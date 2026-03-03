@@ -1,0 +1,143 @@
+---
+title: Orchestra configuration
+description: Configure Open Orchestra using the orchestra-config.json file to customize issue tracker integration and workflow behavior
+---
+
+## Overview
+
+Open Orchestra uses a lightweight configuration file at the repository root to control runtime behavior. The workflow is designed to be zero-config by default.
+
+<Note>
+  When you run any entry-point skill (`requirements-ticket-agent`, `triage-agent`, or `planning-agent`) for the first time in a new repository, it will automatically create a default `/orchestra-config.json` file in the root directory.
+</Note>
+
+## Configuration file location
+
+The configuration file must be placed at the repository root:
+
+```
+your-repo/
+  orchestra-config.json
+  src/
+  package.json
+  ...
+```
+
+## Default configuration
+
+By default, the system assumes you are using **Linear** as your issue tracker:
+
+```json orchestra-config.json
+{
+  "issue_tracker": "linear"
+}
+```
+
+## Configuration options
+
+<ParamField path="issue_tracker" type="string" required>
+  Specifies which issue tracking system to use for workflow operations.
+  
+  **Accepted values:**
+  - `linear` - Use Linear for issue tracking (default)
+  - `jira` - Use Jira for issue tracking
+  
+  <Warning>
+    All agent skills read this value to determine which MCP (Model Context Protocol) server to use for tracker operations. If the configured tracker MCP is unavailable, skills will stop immediately and not proceed.
+  </Warning>
+</ParamField>
+
+## Switching issue trackers
+
+<Tabs>
+  <Tab title="Linear (default)">
+    Linear is the default issue tracker. No configuration changes needed:
+    
+    ```json orchestra-config.json
+    {
+      "issue_tracker": "linear"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Jira">
+    To switch to Jira, edit the `issue_tracker` value:
+    
+    ```json orchestra-config.json
+    {
+      "issue_tracker": "jira"
+    }
+    ```
+    
+    <Note>
+      After updating the configuration, ensure the Jira MCP server is available and properly configured before running any workflow skills.
+    </Note>
+  </Tab>
+</Tabs>
+
+## How skills use configuration
+
+Every Open Orchestra skill follows this runtime configuration pattern:
+
+1. **Read configuration** - Skills read `/orchestra-config.json` from the repository root before starting
+2. **Auto-create if missing** - Entry-point skills (`requirements-ticket-agent`, `triage-agent`, `planning-agent`) automatically create the file with default values if it doesn't exist
+3. **Validate MCP availability** - Skills verify the configured tracker MCP is available before proceeding
+4. **Stop on failure** - If the configured issue tracker MCP is unavailable, skills stop immediately and do not proceed with the task
+
+## Skills that read configuration
+
+All workflow skills read and respect the `orchestra-config.json` settings:
+
+- `requirements-ticket-agent`
+- `triage-agent`
+- `planning-agent`
+- `qa-agent`
+- `implementation-agent`
+- `pr-review-agent`
+
+## Example workflow
+
+<CodeGroup>
+```json Initial run (auto-created)
+{
+  "issue_tracker": "linear"
+}
+```
+
+```json Switched to Jira
+{
+  "issue_tracker": "jira"
+}
+```
+</CodeGroup>
+
+## Troubleshooting
+
+### Configuration file not found
+
+If you run a non-entry-point skill and the configuration file is missing, you may encounter errors. To resolve:
+
+1. Run an entry-point skill first (`requirements-ticket-agent`, `triage-agent`, or `planning-agent`)
+2. Or manually create the file with default values at the repository root
+
+### MCP unavailable errors
+
+If a skill stops with an MCP unavailable error:
+
+1. Verify the configured tracker value is valid (`linear` or `jira`)
+2. Ensure the corresponding MCP server is installed and running
+3. Check MCP server configuration and authentication
+
+<Warning>
+  Skills will not fall back to another tracker if the configured MCP is unavailable. This prevents accidental tracker mismatches and ensures data consistency.
+</Warning>
+
+## Version tracking
+
+Each skill stamps its version in tracker artifacts for traceability:
+
+```
+Skill-Version: planning-agent@0.0.1
+```
+
+This helps track which skill version created or modified specific issues, subtasks, and comments.

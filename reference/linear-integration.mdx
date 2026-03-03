@@ -1,0 +1,140 @@
+---
+title: 'Linear integration'
+description: 'Configure and use Linear as your issue tracker for Open Orchestra workflows'
+keywords: ['linear', 'integration', 'issue tracker', 'mcp', 'configuration']
+---
+
+## Overview
+
+Open Orchestra uses Linear as the default issue tracker for managing tickets, subtasks, and workflow execution throughout the agent pipeline. Linear integration requires the Linear MCP (Model Context Protocol) server to be available.
+
+## Prerequisites
+
+<Info>
+  Ensure you have access to Linear and appropriate permissions to create and manage issues in your workspace.
+</Info>
+
+- Linear workspace access
+- Linear MCP server installed and configured
+- Valid Linear API credentials
+
+## Setup
+
+<Steps>
+  <Step title="Install the Linear MCP server">
+    Follow the Linear MCP server installation instructions for your agent runtime environment. The MCP server provides the communication layer between Open Orchestra agents and your Linear workspace.
+  </Step>
+
+  <Step title="Configure orchestra-config.json">
+    When you run any entry-point skill for the first time, Open Orchestra automatically creates an `orchestra-config.json` file in your repository root with Linear as the default tracker:
+
+    ```json orchestra-config.json
+    {
+      "issue_tracker": "linear"
+    }
+    ```
+
+    If the file already exists with a different tracker, edit it to use Linear.
+  </Step>
+
+  <Step title="Verify MCP availability">
+    Before running any skill, ensure the Linear MCP server is available. If the configured issue tracker MCP is unavailable, skills will stop immediately and not proceed with tracker operations.
+  </Step>
+</Steps>
+
+## Usage
+
+### Creating tickets
+
+All tracker-writing skills create issues in Linear using the configured MCP:
+
+- **requirements-ticket-agent** creates parent issues with structured requirements
+- **planning-agent** creates Technical Plan subtasks and implementation subtasks
+- **qa-agent** creates QA plan subtasks
+
+### Workflow tags
+
+Open Orchestra uses specific tags on Linear issues to track workflow stage completion:
+
+**Completion tags:**
+- `requirements-done`
+- `planning-done`
+- `qa-done`
+- `implementation-done`
+- `pr-published`
+- `pr-reviewed`
+
+**Open-question tags:**
+- `open-requirements-questions`
+- `open-planning-questions`
+- `open-qa-questions`
+- `open-implementation-questions`
+- `open-pr-review-questions`
+
+### Issue status transitions
+
+Agents update Linear issue status as work progresses:
+
+- **In progress** — Set by planning-agent after planning is complete
+- **In review** — Set by implementation-agent after PR is published
+- **Done** — Set by pr-review-agent when review is clean
+
+### Audit trail
+
+Every tracker operation includes a skill version stamp for traceability:
+
+```
+Skill-Version: planning-agent@0.0.1
+```
+
+All tracker-writing skills leave an explicit audit trail with:
+
+- Rich artifact content in issue/subtask bodies
+- `Reasoning` section explaining agent decisions
+- `References` section listing exact inputs used
+- `Assumptions` section with unresolved unknowns
+- Parent issue comment named `Execution-Trace` with actions, decisions, and blockers
+
+## Handoff comments
+
+Agents write handoff comments to Linear issues in a structured JSON format wrapped in `<!-- OPEN-ORCHESTRA-HANDOFF -->` markers. These comments enable efficient context passing between agents without reading full issue history.
+
+<Note>
+  Downstream agents read only the most recent handoff comment for stage-specific context, avoiding expensive full history reads.
+</Note>
+
+## Troubleshooting
+
+<Warning>
+  If the Linear MCP is unavailable, all tracker operations will be blocked and skills will stop immediately.
+</Warning>
+
+### Common issues
+
+**MCP server not available**
+- Verify the Linear MCP server is running
+- Check your MCP server configuration and credentials
+- Ensure network connectivity to Linear API
+
+**Permission errors**
+- Verify your Linear API token has sufficient permissions
+- Ensure you can create issues, subtasks, and comments in the target workspace
+
+**Missing tags**
+- Open Orchestra creates workflow tags automatically
+- If tags are missing, check that the agent completed its stage successfully
+- Review the `Execution-Trace` comment for any reported errors
+
+## Switching from Linear
+
+To switch from Linear to Jira, edit the `issue_tracker` value in `orchestra-config.json`:
+
+```json orchestra-config.json
+{
+  "issue_tracker": "jira"
+}
+```
+
+<Tip>
+  No other configuration changes are required. Skills automatically use the configured tracker MCP.
+</Tip>

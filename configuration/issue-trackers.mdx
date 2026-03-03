@@ -1,0 +1,405 @@
+---
+title: Issue tracker integration
+description: Configure Linear or Jira integration for Open Orchestra's ticket-driven workflow using MCP servers
+---
+
+## Overview
+
+Open Orchestra integrates with issue tracking systems through MCP (Model Context Protocol) servers. The workflow supports both Linear and Jira, with Linear as the default.
+
+## Supported issue trackers
+
+<CardGroup cols={2}>
+  <Card title="Linear" icon="line-chart">
+    Default issue tracker with native MCP support
+  </Card>
+  <Card title="Jira" icon="atlassian">
+    Enterprise issue tracking with MCP integration
+  </Card>
+</CardGroup>
+
+## Configuring Linear (default)
+
+Linear is the default issue tracker and requires minimal configuration.
+
+### Setup steps
+
+1. **Verify configuration file**
+   
+   Ensure `/orchestra-config.json` exists at your repository root:
+   
+   ```json orchestra-config.json
+   {
+     "issue_tracker": "linear"
+   }
+   ```
+
+2. **Install Linear MCP server**
+   
+   Follow Linear's MCP server installation guide to set up the integration.
+
+3. **Authenticate**
+   
+   Configure Linear API credentials as required by the MCP server.
+
+4. **Test the integration**
+   
+   Run an entry-point skill to verify the Linear MCP is available:
+   
+   ```bash
+   Use $triage-agent for LIN-123
+   ```
+
+<Note>
+  Linear issue IDs typically follow the format `LIN-123`, `PROJ-456`, etc., where the prefix matches your Linear workspace identifier.
+</Note>
+
+## Configuring Jira
+
+To use Jira instead of Linear, you'll need to update the configuration and ensure the Jira MCP server is available.
+
+### Setup steps
+
+1. **Update configuration**
+   
+   Edit `/orchestra-config.json` at your repository root:
+   
+   ```json orchestra-config.json
+   {
+     "issue_tracker": "jira"
+   }
+   ```
+
+2. **Install Jira MCP server**
+   
+   Set up the Jira MCP server according to its installation documentation.
+
+3. **Configure authentication**
+   
+   Provide Jira instance URL, username, and API token to the MCP server.
+
+4. **Test the integration**
+   
+   Run an entry-point skill with a Jira issue ID:
+   
+   ```bash
+   Use $triage-agent for PROJ-123
+   ```
+
+<Warning>
+  After switching to Jira, all workflow skills will use only the Jira MCP for tracker operations. Ensure the MCP server is properly configured before running any skills.
+</Warning>
+
+## How tracker integration works
+
+### MCP-based operations
+
+All Open Orchestra skills use MCP servers for tracker operations:
+
+<Steps>
+  <Step title="Read configuration">
+    Skills read `orchestra-config.json` to determine which tracker to use
+  </Step>
+  
+  <Step title="Verify MCP availability">
+    Skills check that the configured tracker's MCP server is available
+  </Step>
+  
+  <Step title="Execute operations">
+    Skills perform tracker operations (read/write issues, comments, tags) through the MCP
+  </Step>
+  
+  <Step title="Fail safely">
+    If MCP is unavailable, skills stop immediately without making changes
+  </Step>
+</Steps>
+
+### Tracker operations
+
+Skills perform these operations through the configured tracker:
+
+- **Read operations**
+  - Fetch parent issue details (title, description, acceptance criteria)
+  - Read existing tags/labels
+  - Retrieve previous handoff comments
+  - List child subtasks
+
+- **Write operations**
+  - Create implementation subtasks
+  - Add workflow tags (`requirements-done`, `planning-done`, etc.)
+  - Post execution trace and handoff comments
+  - Update issue status
+  - Mark subtasks as complete
+
+## Workflow tags contract
+
+Both Linear and Jira implementations must support these workflow tags:
+
+### Completion tags
+
+<ParamField path="requirements-done" type="tag">
+  Requirements gathering is complete
+</ParamField>
+
+<ParamField path="planning-done" type="tag">
+  Technical planning and subtask creation is complete
+</ParamField>
+
+<ParamField path="qa-done" type="tag">
+  QA plan has been created
+</ParamField>
+
+<ParamField path="implementation-done" type="tag">
+  All implementation subtasks are complete
+</ParamField>
+
+<ParamField path="pr-published" type="tag">
+  Pull request has been published
+</ParamField>
+
+<ParamField path="pr-reviewed" type="tag">
+  Pull request review is complete
+</ParamField>
+
+### Open question tags
+
+These tags indicate blockers at specific workflow stages:
+
+<CodeGroup>
+```text Requirements stage
+open-requirements-questions
+```
+
+```text Planning stage
+open-planning-questions
+```
+
+```text QA stage
+open-qa-questions
+```
+
+```text Implementation stage
+open-implementation-questions
+```
+
+```text PR review stage
+open-pr-review-questions
+```
+</CodeGroup>
+
+### Story point tags
+
+Applied to parent issues only (not subtasks):
+
+- `story-point-2` - Very small scope, low risk, minimal unknowns
+- `story-point-3` - Small scope, moderate complexity, limited unknowns
+- `story-point-5` - Medium scope or cross-module work, notable uncertainty
+- `story-point-8` - Large scope with multiple dependencies and higher risk
+- `story-point-13` - Very large/high uncertainty; recommendation to split
+
+<Note>
+  When a parent issue receives `story-point-8` or `story-point-13`, the planning agent automatically adds a `human-review-required` tag to signal manual review.
+</Note>
+
+## Audit trail requirements
+
+All tracker-writing skills must leave an explicit audit trail in tracker artifacts:
+
+### Required sections in issues and subtasks
+
+<Tabs>
+  <Tab title="Reasoning">
+    Explains why the agent chose the proposed scope/plan.
+    
+    ```markdown Example
+    ## Reasoning
+    
+    Split API and UI work into separate subtasks because:
+    - API changes can be tested independently
+    - UI depends on API completion
+    - Allows parallel review of backend logic
+    ```
+  </Tab>
+  
+  <Tab title="References">
+    Lists exact inputs used (ticket fields, child tasks, files, PR links).
+    
+    ```markdown Example
+    ## References
+    
+    - Parent issue: LIN-123
+    - Files inspected:
+      - src/routes/v1/router.ts
+      - src/models/order.ts
+    - Related PR: #456
+    ```
+  </Tab>
+  
+  <Tab title="Assumptions">
+    Documents unresolved unknowns and inferred decisions.
+    
+    ```markdown Example
+    ## Assumptions
+    
+    - Database migration will be backward-compatible
+    - Existing API clients can handle new optional fields
+    - No changes needed to authentication flow
+    ```
+  </Tab>
+</Tabs>
+
+### Execution trace format
+
+Parent issues receive an `Execution-Trace` comment with structured information:
+
+```json Example execution trace
+{
+  "agent": "planning-agent",
+  "skill_version": "planning-agent@0.0.1",
+  "timestamp_utc": "2026-02-22T10:30:00Z",
+  "actions": [
+    "read_parent_issue",
+    "inspected_codebase",
+    "created_technical_plan",
+    "created_implement_subtasks",
+    "estimated_story_points"
+  ],
+  "decisions": [
+    "split_api_and_ui_work",
+    "deferred_non_blocking_cleanup"
+  ],
+  "blockers": [],
+  "open_questions": [],
+  "references": [
+    "LIN-123",
+    "src/routes/v1/router.ts",
+    "src/models/order.ts"
+  ]
+}
+```
+
+### Workflow handoff format
+
+Each skill posts a handoff comment for the next stage:
+
+```markdown Handoff comment structure
+## Handing Off for Planning
+
+<!-- OPEN-ORCHESTRA-HANDOFF -->
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. Read parent issue\n2. Inspected codebase\nDecisions:\n- Split API and UI work\nReferences:\n- src/routes/v1/router.ts\nAssumptions:\n- Backward-compatible migration\nOpen-Questions: none\nSkill-Version: planning-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "planning-agent",
+    "to_skill": "implementation-agent",
+    "status": "ready",
+    "delta": ["created 5 implementation subtasks"],
+    "key_decisions": [
+      {
+        "decision": "split_api_and_ui_work",
+        "reason": "enables parallel development and testing"
+      }
+    ],
+    "relevant_artifacts": [
+      {
+        "artifact": "implementation-subtasks",
+        "hash": "sha256:abc123...",
+        "last_modified": "2026-02-22T10:30:00Z",
+        "summary": "5 subtasks covering API, UI, tests, docs, migration"
+      }
+    ],
+    "open_blockers": [],
+    "next_guidance": {
+      "need_full": ["implementation-subtasks"],
+      "focus": ["implement API changes first, then UI"]
+    }
+  }
+}
+```
+```
+
+<Warning>
+  Handoff summaries must be 600 tokens or less to maintain efficient context usage across workflow stages.
+</Warning>
+
+## Switching between trackers
+
+You can switch issue trackers by updating the configuration, but be aware of the implications:
+
+<Steps>
+  <Step title="Update configuration">
+    Edit `orchestra-config.json` and change the `issue_tracker` value
+  </Step>
+  
+  <Step title="Verify MCP availability">
+    Ensure the new tracker's MCP server is installed and authenticated
+  </Step>
+  
+  <Step title="Migrate or start fresh">
+    Decide whether to:
+    - Continue with existing issues in the new tracker
+    - Start new workflows with new issue IDs
+  </Step>
+</Steps>
+
+<Note>
+  Skills do not automatically migrate issues between trackers. If you switch trackers mid-workflow, you'll need to manually recreate issues or complete the current workflow in the original tracker.
+</Note>
+
+## Troubleshooting
+
+### MCP server not found
+
+**Symptom:** Skills stop immediately with "MCP unavailable" error
+
+**Solution:**
+1. Verify the MCP server is installed
+2. Check MCP server is running
+3. Review MCP server logs for connection issues
+
+### Authentication failures
+
+**Symptom:** Tracker operations fail with permission errors
+
+**Solution:**
+1. Verify API credentials are correct
+2. Check token/password hasn't expired
+3. Ensure account has necessary permissions (create issues, add comments, update status)
+
+### Issue ID not found
+
+**Symptom:** Skills can't read parent issue
+
+**Solution:**
+1. Verify issue ID format matches tracker (e.g., `LIN-123` for Linear, `PROJ-456` for Jira)
+2. Confirm issue exists in the tracker
+3. Check account has permission to view the issue
+
+### Tag/label mismatches
+
+**Symptom:** Workflow prerequisites not detected
+
+**Solution:**
+1. Verify tracker supports custom labels/tags
+2. Check tag names match exact workflow contract
+3. Ensure tags are applied to parent issue, not subtasks (for completion tags)
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Use consistent issue ID format">
+    Maintain consistent issue ID format across your team to avoid confusion. Linear uses workspace prefixes (e.g., `LIN-`, `PROJ-`), while Jira uses project keys (e.g., `PROJ-`, `TEAM-`).
+  </Accordion>
+  
+  <Accordion title="Test MCP before production workflows">
+    Before running workflows on critical issues, test the MCP integration with a test issue to verify read/write operations work correctly.
+  </Accordion>
+  
+  <Accordion title="Monitor MCP server health">
+    Set up monitoring for your MCP server to detect authentication expiration or connectivity issues before they block workflows.
+  </Accordion>
+  
+  <Accordion title="Document custom tracker configurations">
+    If your tracker instance uses custom fields or workflows, document these requirements for your team to ensure smooth agent operation.
+  </Accordion>
+</AccordionGroup>

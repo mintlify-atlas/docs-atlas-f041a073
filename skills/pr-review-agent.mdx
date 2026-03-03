@@ -1,0 +1,218 @@
+---
+title: PR review agent
+description: Runs a diff-first PR review with handoff-first context loading, lazy spec extraction, architecture-impact detection, and compact review-to-implementation findings handoff.
+---
+
+The PR review agent runs a focused PR review that starts from changed code, validates only relevant requirements/spec sections, and reports blocking risks with minimal token use.
+
+## Purpose and when to invoke
+
+This agent performs efficient, focused code reviews by starting with the diff and validating only relevant requirements.
+
+**Invoke when:**
+- A PR is ready for review and linked to an issue
+
+## Required inputs
+
+<ParamField path="parent_issue_id" type="string" required>
+  Parent issue ID
+</ParamField>
+
+<ParamField path="pr_published_tag" type="boolean" required>
+  Parent issue tag `pr-published`
+</ParamField>
+
+<ParamField path="pr_diff" type="object" required>
+  Linked PR and PR diff / changed files
+</ParamField>
+
+<ParamField path="handoff_comment" type="object" required>
+  Most recent prior handoff comment in `<!-- OPEN-ORCHESTRA-HANDOFF -->` format
+</ParamField>
+
+## Runtime configuration
+
+The agent reads `/orchestra-config.json` from the repository root before starting.
+
+For every tracker operation, the agent includes: `Skill-Version: pr-review-agent@0.0.1`
+
+<Warning>
+  If the configured issue tracker MCP is unavailable, the agent stops immediately and does not proceed.
+</Warning>
+
+## Outputs
+
+The agent produces:
+
+- **PR comment** with:
+  - Short review summary
+  - Findings that require changes (if any), tied to changed code
+
+- **Issue tracker comment** with:
+  - Short review summary
+  - Required changes checklist (if any)
+
+- **Status update:**
+  - `In Progress` when changes are required
+  - `Done` when changes are acceptable
+
+- **Optional invocation:**
+  - `init-architect` with scoped context when architecture-impacting changes are detected
+
+- **Parent issue tags:**
+  - `pr-reviewed` when review is clean
+  - `open-pr-review-questions` when review is blocked by missing context
+
+- **Handoff comment** with wrapped JSON block
+
+### Handoff format
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. <action>\n2. <action>\nDecisions:\n- <review decision + reason>\nReferences:\n- <PR diff or requirement artifact>\nAssumptions:\n- <assumption>\nOpen-Questions: none|<question list>\nSkill-Version: pr-review-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "pr-review-agent",
+    "to_skill": "implementation-agent|none",
+    "status": "ready|blocked|completed",
+    "delta": ["<new findings or closure updates from this review pass>"],
+    "key_decisions": [{"decision": "<decision>", "reason": "<reason>"}],
+    "relevant_artifacts": [
+      {
+        "artifact": "<artifact name>",
+        "hash": "sha256:<hash>",
+        "last_modified": "<ISO-8601>",
+        "summary": "<short relevance summary>"
+      }
+    ],
+    "open_blockers": [{"blocker": "<text>", "owner": "<owner>", "next_action": "<next action>"}],
+    "next_guidance": {
+      "need_full": ["<artifact names implementation must fully read>"],
+      "focus": ["<highest-priority fix/check items>"],
+      "findings": [
+        {
+          "id": "<finding-id>",
+          "severity": "high|medium|low",
+          "file": "<path>",
+          "problem": "<what is wrong>",
+          "required_change": "<what to change>",
+          "affected_subtasks": ["<subtask identifier>"]
+        }
+      ]
+    }
+  }
+}
+```
+
+<Note>
+  The `handoff_summary` must be ≤ 600 tokens.
+</Note>
+
+## Procedure (diff-first)
+
+<Steps>
+  <Step title="Read configuration and validate">
+    Read `/orchestra-config.json`, set tracker context, and verify the configured issue tracker MCP is available. Validate parent issue has tag `pr-published`.
+  </Step>
+
+  <Step title="Execute context gathering">
+    Follow the strict context gathering order:
+    1. Locate the most recent `<!-- OPEN-ORCHESTRA-HANDOFF -->` comment
+    2. Parse the JSON inside it; treat `handoff_summary` as primary context
+    3. Review `relevant_artifacts` and hashes first
+    4. Declare exactly which artifacts require full reads with `need_full`
+    5. Read full content only if hash changed or review cannot proceed without it
+    6. Do not read entire issue history or all prior execution traces
+  </Step>
+
+  <Step title="Fetch PR diff first">
+    Fetch PR diff and changed files first. This is the primary review input.
+  </Step>
+
+  <Step title="Build minimal evidence set">
+    Build a minimal evidence set from the diff:
+    - Modified modules and behaviors
+    - Affected API/data/auth/integration/runtime surfaces
+    - Acceptance criteria touched by changed code
+  </Step>
+
+  <Step title="Fetch relevant spec sections">
+    Based on the evidence set, declare `need_full` and fetch only relevant sections from:
+    - Acceptance criteria
+    - Technical details
+    - Other artifacts explicitly referenced by prior handoff
+  </Step>
+
+  <Step title="Review for correctness">
+    Review only for correctness/regression risk in changed code and mismatch with the fetched relevant spec sections.
+  </Step>
+
+  <Step title="Detect architecture impact">
+    In the same pass, detect architecture impact from the PR diff. Impact is `true` when one or more of these is present:
+    - API contract changes
+    - Data model/migration/index/persistence contract changes
+    - Service/module boundary changes
+    - Integration/event flow changes
+    - Authn/authz/session/security boundary changes
+    - Runtime/infrastructure behavior changes that alter topology or critical flows
+
+    If architecture impact is `true`, prepare scoped payload for `init-architect`:
+    - Parent issue ID
+    - PR identifier/link
+    - Changed files list
+    - Concise diff summary
+    - Matched architecture-impact cases
+    - Suggested architecture doc sections to update
+  </Step>
+
+  <Step title="Avoid over-engineering">
+    Do not over-engineer:
+    - Avoid style-only nits
+    - Report only issues that can cause bugs, regressions, broken behavior, or criteria mismatch
+  </Step>
+
+  <Step title="Post comments">
+    Post a short PR comment with result and concise findings. Post a short issue tracker comment with the same outcome summary.
+  </Step>
+
+  <Step title="Handle blockers, changes, or completion">
+    If review is blocked by missing context:
+    - Add `open-pr-review-questions`
+    - Post handoff JSON with `status: blocked` and explicit `open_blockers`
+    - Stop and wait for clarifications
+
+    If required code changes are found and review is not blocked:
+    - Remove `open-pr-review-questions` if present
+    - Set issue status to `In Progress`
+    - Post handoff JSON with `to_skill: implementation-agent`, `status: ready`, and `next_guidance.findings` populated
+    - Invoke `implementation-agent` with the same parent issue ID
+
+    If no required changes remain:
+    - Remove `open-pr-review-questions` if present
+    - Add tag `pr-reviewed`
+    - Set issue status to `Done`
+    - Post handoff JSON with `to_skill: none` and `status: completed`
+  </Step>
+
+  <Step title="Invoke init-architect if needed">
+    If architecture impact is `true`, invoke `init-architect` with the scoped payload from step 7.
+  </Step>
+</Steps>
+
+## Guardrails
+
+<Warning>
+  The agent must follow these constraints:
+</Warning>
+
+- Use the PR diff as the first and primary source
+- Do not read the full repository for this review
+- Do not read entire issue history by default
+- Use handoff summary first, then lazy-load only required artifact sections
+- Prioritize correctness and functional risk over stylistic preferences
+- Keep findings actionable and tied to specific changed files
+- Do not run tracker operations unless the MCP for the configured issue tracker is available
+- Keep PR and tracker comments concise; do not paste raw command logs
+
+## Handoff
+
+Primary consumer: `implementation-agent` for fixes; review completes with `to_skill: none` when clean.

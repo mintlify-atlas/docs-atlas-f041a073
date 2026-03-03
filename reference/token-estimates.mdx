@@ -1,0 +1,256 @@
+---
+title: Token estimates
+description: Token consumption estimates for the Open Orchestra workflow
+---
+
+This page provides planning-level token usage estimates for a parent issue moving through the standard Open Orchestra workflow. These are rough estimates based on typical workloads, not exact metered values.
+
+## Assumptions
+
+Estimates are based on the following assumptions:
+
+- One parent issue moving through the standard flow described in the workflow
+- `triage-agent` always runs once per parent issue
+- `requirements-ticket-agent` may be skipped when the parent issue is already well-structured
+- PR publishing is included in `implementation-agent` (no separate `pr-publish-agent` run)
+- "Tokens" means total model tokens (input + output) consumed across each agent run
+- Token usage includes reading tracker artifacts and required handoff blocks
+- Tool execution costs (Git, CLI, network latency) are excluded unless text is fed back into the model
+- Numbers are intentionally conservative and rounded
+
+## Checkpoint estimates
+
+Each agent checkpoint represents a complete run of that agent, including all tracker reads, tool executions, and artifact writes.
+
+### 1. Triage routing
+
+**Agent:** `triage-agent`
+
+**Activity:** Classify complexity, set routing tags, write execution trace and handoff
+
+| Scenario | Estimated tokens |
+|----------|------------------|
+| Low      | 700              |
+| Mid      | 1,200            |
+| High     | 2,200            |
+
+### 2. Requirements drafting
+
+**Agent:** `requirements-ticket-agent` (conditional)
+
+**Activity:** Clarification questions, ticket synthesis, acceptance criteria, execution trace, handoff
+
+<Note>
+  This step may be skipped when the parent issue is already well-structured.
+</Note>
+
+| Scenario | Estimated tokens |
+|----------|------------------|
+| Low      | 2,500            |
+| Mid      | 4,500            |
+| High     | 8,000            |
+
+### 3. Architecture handoff
+
+**Agent:** `architect-agent` (deprecated)
+
+**Activity:** Read architecture docs and parent issue, create `technical-details`, trace and handoff
+
+<Warning>
+  This agent is deprecated. The `planning-agent` now performs codebase inspection directly instead of relying on pre-built architecture docs.
+</Warning>
+
+| Scenario | Estimated tokens |
+|----------|------------------|
+| Low      | 2,000            |
+| Mid      | 3,500            |
+| High     | 6,500            |
+
+### 4. QA planning
+
+**Agent:** `qa-agent`
+
+**Activity:** Read requirements and technical details, generate QA plan, trace and handoff
+
+| Scenario | Estimated tokens |
+|----------|------------------|
+| Low      | 1,800            |
+| Mid      | 3,000            |
+| High     | 5,000            |
+
+### 5. Implementation planning
+
+**Agent:** `planning-agent`
+
+**Activity:** Read parent issue, QA plan, and technical details; create up to 8 subtasks; estimate story points; trace and handoff
+
+| Scenario | Estimated tokens |
+|----------|------------------|
+| Low      | 2,500            |
+| Mid      | 4,000            |
+| High     | 7,000            |
+
+### 6. Implementation and PR publish
+
+**Agent:** `implementation-agent`
+
+**Activity:** Read subtasks and context, implement task-by-task, summarize build and lint outcomes, publish PR, handoff
+
+<Note>
+  This is typically the most token-intensive checkpoint due to large input context (multiple subtasks and code diff summaries), iterative reasoning, and PR publication payload generation.
+</Note>
+
+| Scenario | Estimated tokens |
+|----------|------------------|
+| Low      | 5,000            |
+| Mid      | 9,800            |
+| High     | 19,000           |
+
+### 7. PR review
+
+**Agent:** `pr-review-agent`
+
+**Activity:** Read issue, technical details, and PR diff; perform risk review; write tracker and PR comments; handoff
+
+<Note>
+  Token usage scales with PR diff size and cross-checking against acceptance criteria and technical details.
+</Note>
+
+| Scenario | Estimated tokens |
+|----------|------------------|
+| Low      | 3,000            |
+| Mid      | 6,000            |
+| High     | 12,000           |
+
+## End-to-end totals
+
+These totals represent complete workflow runs from triage through PR review with no blockers or rework loops.
+
+### Clean path with requirements step
+
+No blocked questions, no review rework loop.
+
+- **Low:** ~17,500 tokens
+- **Mid:** ~32,000 tokens
+- **High:** ~59,700 tokens
+
+### Clean path without requirements step
+
+Triage routes directly to architecture/planning.
+
+- **Low:** ~15,000 tokens
+- **Mid:** ~27,500 tokens
+- **High:** ~51,700 tokens
+
+### With one rework loop
+
+PR review finds fixes; implementation and review run again.
+
+**Additional tokens for one loop:**
+
+- **Low:** +8,000
+- **Mid:** +15,800
+- **High:** +31,000
+
+**Rework-path totals:**
+
+- **Low:** ~25,500 tokens
+- **Mid:** ~47,800 tokens
+- **High:** ~90,700 tokens
+
+## Where token spikes usually happen
+
+### 1. Implementation agent
+
+Large input context (multiple subtasks and code diff summaries), iterative reasoning, and PR publication payload generation.
+
+**Typical spike scenarios:**
+- 6+ implementation subtasks
+- Large file modifications
+- Complex cross-module dependencies
+
+### 2. PR review agent
+
+PR diff size and cross-checking against acceptance criteria and technical details.
+
+**Typical spike scenarios:**
+- PRs with 1000+ lines changed
+- Multi-file refactoring
+- Breaking changes requiring extensive validation
+
+### 3. Requirements ticket agent
+
+Clarification rounds can increase output significantly when scope is ambiguous.
+
+**Typical spike scenarios:**
+- Vague user requests requiring 3+ clarification rounds
+- Complex domain logic requiring detailed acceptance criteria
+- Multi-stakeholder requirements with conflicting needs
+
+## Blocked and open-question overhead
+
+Each blocked state (`open-*-questions`) adds token overhead for clarification cycles.
+
+**Per clarification cycle:** ~500 to 1,800 tokens
+
+**Reasons for overhead:**
+- Re-reading latest `Workflow-Handoff`
+- Writing blocker comments
+- Producing a revised handoff after clarification
+
+**Example:**
+
+If `planning-agent` encounters 2 open questions requiring clarification:
+
+```
+Standard planning: 4,000 tokens (mid)
++ First clarification: +800 tokens
++ Second clarification: +800 tokens
+= Total: 5,600 tokens
+```
+
+## Quick capacity rule of thumb
+
+For planning budget per issue:
+
+| Issue complexity | Recommended budget |
+|------------------|--------------------|
+| Straight-through issue | 35k tokens |
+| Issue likely to need one review loop | 50k tokens |
+| Complex/high-ambiguity issue | 90k tokens |
+
+<Note>
+  These budgets align with the midpoint estimates and provide safety margin for variance in prompt size and artifact verbosity.
+</Note>
+
+## Optimization strategies
+
+To reduce token consumption:
+
+1. **Provide clear requirements upfront** — reduces clarification rounds in `requirements-ticket-agent`
+2. **Keep subtask count low** — target 3-6 implementation subtasks instead of 8
+3. **Use handoff-first context loading** — agents should read only the previous handoff summary, not full issue history
+4. **Lazy-load artifacts** — only read full artifact content when hash has changed or explicitly required
+5. **Keep Technical Plan subtasks short** — avoid exhaustive documentation; orient implementation agent with just enough detail
+
+## Monitoring token usage
+
+Each agent includes a `Skill-Version` stamp in tracker artifacts. Use these stamps to:
+
+- Track which agent version consumed tokens
+- Identify agent runs that exceeded expected budgets
+- Correlate token spikes with specific workflow stages
+
+Example execution trace with skill version:
+
+```json
+{
+  "agent": "planning-agent",
+  "skill_version": "planning-agent@0.0.1",
+  "timestamp_utc": "2026-02-22T10:30:00Z",
+  "actions": [...],
+  "decisions": [...],
+  "blockers": [],
+  "open_questions": []
+}
+```

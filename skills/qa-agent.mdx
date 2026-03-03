@@ -1,0 +1,165 @@
+---
+title: QA agent
+description: Creates a QA planning subtask tagged qa-plan using handoff-first context loading and lazy artifact reads. Depends on requirements and planning being done.
+---
+
+The QA agent turns ticket requirements into a concrete, ticket-native QA test case set before implementation begins.
+
+## Purpose and when to invoke
+
+This agent transforms requirements into explicit test cases that define quality expectations.
+
+**Invoke when:**
+- After Planning Agent creates implementation subtasks
+- Before Implementation Agent starts code changes
+
+## Required inputs
+
+<ParamField path="parent_issue_id" type="string" required>
+  Parent issue ID (source of truth ticket)
+</ParamField>
+
+<ParamField path="planning_done_tag" type="boolean" required>
+  Parent issue tag `planning-done`
+</ParamField>
+
+<ParamField path="handoff_comment" type="object" required>
+  Most recent prior handoff comment in `<!-- OPEN-ORCHESTRA-HANDOFF -->` format
+</ParamField>
+
+## Runtime configuration
+
+The agent reads `/orchestra-config.json` from the repository root before starting.
+
+For every tracker operation, the agent includes: `Skill-Version: qa-agent@0.0.1`
+
+<Warning>
+  If the configured issue tracker MCP is unavailable, the agent stops immediately and does not proceed.
+</Warning>
+
+## Outputs
+
+The agent produces:
+
+- **A new subtask** under the parent issue, tagged `qa-plan`
+
+- **Test cases** written directly in that QA subtask, including:
+  - Positive path cases
+  - Edge and failure cases
+  - Non-functional checks relevant to ticket scope
+  - Clear pass/fail expectations per test case
+
+- **QA subtask body** also includes:
+  - `Reasoning` (why these tests cover the risk profile)
+  - `References` (parent acceptance criteria + technical-details links/IDs)
+  - `Assumptions` (unknowns and deferred checks)
+
+- **Parent issue tags:**
+  - `qa-done` when QA planning is complete
+  - `open-qa-questions` when QA planning is blocked
+
+- **Handoff comment** with wrapped JSON block
+
+### Handoff format
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. <action>\n2. <action>\nDecisions:\n- <coverage decision + reason>\nReferences:\n- <source artifact>\nAssumptions:\n- <assumption>\nOpen-Questions: none|<question list>\nSkill-Version: qa-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "qa-agent",
+    "to_skill": "planning-agent",
+    "status": "ready|blocked",
+    "delta": ["<what changed in QA planning>"],
+    "key_decisions": [{"decision": "<decision>", "reason": "<reason>"}],
+    "relevant_artifacts": [
+      {
+        "artifact": "qa-plan",
+        "hash": "sha256:<hash>",
+        "last_modified": "<ISO-8601>",
+        "summary": "<coverage summary and risk focus>"
+      }
+    ],
+    "open_blockers": [{"blocker": "<text>", "owner": "<owner>", "next_action": "<action>"}],
+    "next_guidance": {
+      "need_full": ["<artifact names to fully read next>"],
+      "focus": ["<high-risk areas planning must preserve>"]
+    }
+  }
+}
+```
+
+<Note>
+  The `handoff_summary` must be ≤ 600 tokens.
+</Note>
+
+## Procedure
+
+<Steps>
+  <Step title="Read configuration and validate">
+    Read `/orchestra-config.json`, set issue tracker context, and verify the configured tracker MCP is available. Validate that parent issue has tag `planning-done`.
+  </Step>
+
+  <Step title="Execute context gathering">
+    Follow the strict context gathering order:
+    1. Locate the most recent `<!-- OPEN-ORCHESTRA-HANDOFF -->` comment
+    2. Parse the JSON inside it as primary context
+    3. Look at `relevant_artifacts` list and hashes
+    4. Declare exactly which artifacts you need via `need_full`
+    5. Only read full content if hash changed or explicitly required
+    6. Do not read entire issue history or all prior execution traces
+  </Step>
+
+  <Step title="Read requirements and subtasks">
+    Read parent issue requirements context (description and acceptance criteria) only when declared in `need_full`. Find and read the child implementation subtasks tagged `implement` to understand planned technical scope.
+  </Step>
+
+  <Step title="Draft test cases">
+    Translate ticket requirements into explicit testable behaviors. Draft comprehensive test cases for:
+    - Happy path
+    - Edge cases
+    - Failure modes
+    - Scope-relevant non-functional checks
+  </Step>
+
+  <Step title="Create QA subtask">
+    Create a subtask titled `QA Plan: <parent issue title>` and apply tag `qa-plan`. Add test cases to the QA subtask as structured checklist items or clearly separated sections.
+  </Step>
+
+  <Step title="Handle ambiguity or finalize">
+    If ambiguity remains:
+    - Add tag `open-qa-questions`
+    - Post handoff JSON with `status: blocked` and explicit `open_blockers`
+    - Stop and wait for clarifications
+
+    If QA plan is complete:
+    - Remove `open-qa-questions` if present
+    - Add tag `qa-done`
+    - Post handoff JSON with `status: ready` and no blockers
+  </Step>
+
+  <Step title="Notify implementation agent">
+    QA is informational; implementation continues from `implementation-agent`. Optionally notify the implementation agent that QA expectations are available.
+  </Step>
+</Steps>
+
+## Guardrails
+
+<Warning>
+  The agent must follow these constraints:
+</Warning>
+
+- Do not rewrite product scope
+- Flag ambiguity as open questions in tracker comments instead of guessing
+- Separate must-pass checks from optional hardening checks
+- Do not create `QA_PLAN.md` or any external QA artifact
+- Do not create title-only `qa-plan` subtasks; include required body sections
+- Do not read repository code files for QA planning
+- If no implementation subtasks tagged `implement` exist, add a blocking comment on the parent ticket and stop
+- If ticket scope and requirement details conflict, log mismatch in the tracker before proceeding
+- Do not run tracker operations unless the MCP for the configured issue tracker is available
+- Keep tracker comments concise and avoid repeating the full QA test list in parent comments
+- Do not reconstruct state from full comment history; use handoff summary first and lazy-load only required artifacts
+
+## Handoff
+
+QA planning is a parallel quality gate. It does not block implementation; `implementation-agent` is the primary downstream consumer via the `planning-done` tag.

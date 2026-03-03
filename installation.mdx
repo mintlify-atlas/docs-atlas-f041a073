@@ -1,0 +1,319 @@
+---
+title: Installation
+description: Detailed setup instructions for Open Orchestra skills and dependencies
+---
+
+## Install Open Orchestra skills
+
+Open Orchestra is distributed as a skill pack that can be installed directly from the GitHub repository:
+
+```bash
+npx skills add https://github.com/vishal2457/open-orchestra/tree/main/skills
+```
+
+This command installs all six workflow skills:
+
+<CardGroup cols={2}>
+  <Card title="requirements-ticket-agent" icon="file-lines">
+    Converts informal requests into structured tickets with acceptance criteria
+  </Card>
+  
+  <Card title="triage-agent" icon="filter">
+    Classifies work as trivial, standard, or complex and sets routing guidance
+  </Card>
+  
+  <Card title="planning-agent" icon="map">
+    Inspects live codebase and creates technical plan with implementation subtasks
+  </Card>
+  
+  <Card title="qa-agent" icon="flask">
+    Creates ticket-native test cases from requirements and implementation subtasks
+  </Card>
+  
+  <Card title="implementation-agent" icon="code">
+    Executes subtasks, records build/lint outcomes, and publishes PR
+  </Card>
+  
+  <Card title="pr-review-agent" icon="magnifying-glass">
+    Performs diff-first review with severity-ranked findings
+  </Card>
+</CardGroup>
+
+## Prerequisites
+
+### Issue tracker MCP server
+
+Open Orchestra requires an issue tracker MCP (Model Context Protocol) server to read and write tickets.
+
+<Tabs>
+  <Tab title="Linear (default)">
+    By default, Open Orchestra uses **Linear** as the issue tracker.
+    
+    **Setup:**
+    
+    <Steps>
+      <Step title="Install Linear MCP server">
+        Follow the Linear MCP installation instructions for your agent runtime.
+      </Step>
+      
+      <Step title="Authenticate">
+        Configure your Linear API key according to the MCP server documentation.
+      </Step>
+      
+      <Step title="Verify access">
+        Ensure the MCP server can read and write Linear issues before running Open Orchestra skills.
+      </Step>
+    </Steps>
+    
+    <Note>
+      The first time you run any entry-point skill (`requirements-ticket-agent`, `triage-agent`, or `planning-agent`), it will automatically create `/orchestra-config.json` with `"issue_tracker": "linear"`.
+    </Note>
+  </Tab>
+  
+  <Tab title="Jira">
+    To use **Jira** instead of Linear:
+    
+    **Setup:**
+    
+    <Steps>
+      <Step title="Install Jira MCP server">
+        Follow the Jira MCP installation instructions for your agent runtime.
+      </Step>
+      
+      <Step title="Authenticate">
+        Configure your Jira credentials according to the MCP server documentation.
+      </Step>
+      
+      <Step title="Run first skill">
+        Run any entry-point skill once to auto-create `/orchestra-config.json`.
+      </Step>
+      
+      <Step title="Switch tracker">
+        Edit `/orchestra-config.json` in your repository root:
+        
+        ```json
+        {
+          "issue_tracker": "jira"
+        }
+        ```
+      </Step>
+      
+      <Step title="Verify access">
+        Run a skill again to confirm Jira MCP operations work correctly.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Warning>
+  If the configured issue tracker MCP is unavailable, skills will stop immediately and not proceed with tracker operations.
+</Warning>
+
+### GitHub CLI
+
+The `implementation-agent` and `pr-review-agent` require the GitHub CLI (`gh`) for PR operations.
+
+<Steps>
+  <Step title="Install gh CLI">
+    <CodeGroup>
+    ```bash macOS
+    brew install gh
+    ```
+    
+    ```bash Linux (apt)
+    sudo apt install gh
+    ```
+    
+    ```bash Windows (winget)
+    winget install --id GitHub.cli
+    ```
+    
+    ```bash From source
+    # Visit https://cli.github.com for manual installation
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Authenticate with GitHub">
+    ```bash
+    gh auth login
+    ```
+    
+    Follow the interactive prompts to authenticate with your GitHub account.
+  </Step>
+  
+  <Step title="Verify installation">
+    ```bash
+    gh --version
+    # Expected output: gh version 2.x.x (YYYY-MM-DD)
+    
+    gh auth status
+    # Expected output: Logged in to github.com as <username>
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  `implementation-agent` will immediately stop if the `gh` CLI is unavailable.
+</Warning>
+
+### Git configuration
+
+Ensure git is configured with your user name and email:
+
+```bash
+# Check current configuration
+git config --global user.name
+git config --global user.email
+
+# Set if not configured
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+```
+
+## Configuration
+
+### Auto-generated configuration file
+
+The first time you run any entry-point skill, Open Orchestra automatically creates `/orchestra-config.json` in your repository root:
+
+```json Default configuration
+{
+  "issue_tracker": "linear"
+}
+```
+
+<Note>
+  This is a **zero-config** workflow. You only need to edit `orchestra-config.json` if you want to switch from Linear to Jira.
+</Note>
+
+### Switching issue trackers
+
+To switch from Linear to Jira (or vice versa), edit the `issue_tracker` field:
+
+<CodeGroup>
+```json Linear
+{
+  "issue_tracker": "linear"
+}
+```
+
+```json Jira
+{
+  "issue_tracker": "jira"
+}
+```
+</CodeGroup>
+
+All skills read this configuration file before starting and use only the configured tracker MCP for operations.
+
+## Verify installation
+
+Confirm that all prerequisites are installed and configured:
+
+<Steps>
+  <Step title="Check skill installation">
+    In your agent runtime (Codex, etc.), verify that skills are available:
+    
+    ```bash
+    # List available skills
+    # You should see all six Open Orchestra skills listed
+    ```
+  </Step>
+  
+  <Step title="Check issue tracker MCP">
+    Verify the configured tracker MCP (Linear or Jira) is available:
+    
+    ```bash
+    # For Linear
+    # Attempt to read a test issue
+    
+    # For Jira
+    # Attempt to read a test issue
+    ```
+  </Step>
+  
+  <Step title="Check GitHub CLI">
+    ```bash
+    gh auth status
+    # Expected: Logged in to github.com as <username>
+    ```
+  </Step>
+  
+  <Step title="Check Git configuration">
+    ```bash
+    git config user.name && git config user.email
+    # Expected: Your name and email
+    ```
+  </Step>
+</Steps>
+
+## Repository structure
+
+After installation, your repository will include:
+
+```text
+your-repo/
+  orchestra-config.json        # Auto-created on first skill run
+  .git/                        # Git repository (required)
+  src/                         # Your application code
+  ...
+```
+
+<Note>
+  Open Orchestra skills do **not** create external architecture documentation or additional files. All artifacts (technical plans, QA test cases, execution traces) live in the issue tracker as subtasks and comments.
+</Note>
+
+## Workflow tags
+
+Open Orchestra uses workflow tags to coordinate skill execution and handoffs. These tags are automatically managed by the skills:
+
+### Stage completion tags
+
+Applied to parent issues when a stage completes successfully:
+
+- `requirements-done` - Requirements are complete and actionable
+- `planning-done` - Technical plan and implementation subtasks created
+- `qa-done` - QA plan subtask created with test cases
+- `implementation-done` - All implementation subtasks completed
+- `pr-published` - Pull request created and linked to issue
+- `pr-reviewed` - PR review completed with merge recommendation
+
+### Open-question tags
+
+Applied to parent issues when a skill is blocked and needs clarification:
+
+- `open-requirements-questions` - Requirements gathering blocked
+- `open-planning-questions` - Planning blocked (unresolved ambiguity)
+- `open-qa-questions` - QA planning blocked
+- `open-implementation-questions` - Implementation blocked
+- `open-pr-review-questions` - Review blocked by missing context
+
+### Special tags
+
+- `human-review-required` - Applied when story points are 8 or 13 (large/complex scope)
+- `story-point-2`, `story-point-3`, `story-point-5`, `story-point-8`, `story-point-13` - Applied by `planning-agent` for estimation
+
+<Warning>
+  Skills will **not** auto-invoke the next agent while an `open-*-questions` tag is present. Remove the tag after providing clarifications to resume the workflow.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="play" href="/quickstart">
+    Run your first skill and complete a workflow from requirements to PR
+  </Card>
+  
+  <Card title="Available skills" icon="toolbox" href="/skills/requirements-ticket-agent">
+    Complete reference for all 6 workflow skills with inputs and outputs
+  </Card>
+  
+  <Card title="Workflow tags" icon="tags" href="/reference/workflow-tags">
+    Tag contracts for stage completion and open-question handling
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration/orchestra-config">
+    Advanced configuration options and custom build/lint commands
+  </Card>
+</CardGroup>

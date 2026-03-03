@@ -1,0 +1,164 @@
+---
+title: Introduction to Open Orchestra
+description: A skill pack for AI agents that runs ticket-driven software delivery from requirements to PR review and issue closure
+---
+
+<Note>
+  Open Orchestra implements AI agents the way real development teams work — ticket by ticket, grounded in the actual codebase.
+</Note>
+
+## What is Open Orchestra?
+
+Open Orchestra is a skill pack for AI agents that orchestrates complete software delivery workflows. It takes informal user requests and transforms them into shipped code through a structured, auditable pipeline that mirrors agile development practices.
+
+Instead of requiring pre-built architecture documentation that drifts out of sync, Open Orchestra agents read your live codebase directly. The planning agent navigates source files using search and file-reading tools to produce precise technical plans grounded in what the code actually looks like right now.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Zero-config setup" icon="rocket">
+    No initialization rituals. First run auto-creates `/orchestra-config.json` with sensible defaults. Switch between Linear and Jira by editing one field.
+  </Card>
+  
+  <Card title="Live codebase inspection" icon="code">
+    No stale architecture docs. Planning agent uses `grep`, `ripgrep`, and `view_file` to read actual code patterns and produce grounded technical plans.
+  </Card>
+  
+  <Card title="Auditable execution trail" icon="list-check">
+    Every skill leaves structured JSON handoffs with actions, decisions, references, and assumptions. Machine-parseable for validation and chaining.
+  </Card>
+  
+  <Card title="Token-efficient handoffs" icon="gauge-high">
+    Agents use compact JSON summaries (≤600 tokens) with lazy artifact loading. Only read full context when hashes change or explicitly needed.
+  </Card>
+  
+  <Card title="Automatic skill chaining" icon="link">
+    Skills auto-invoke the next agent when unblocked. Manual intervention only needed when `open-*-questions` tags are present.
+  </Card>
+  
+  <Card title="Tracker-native workflow" icon="ticket">
+    All artifacts live in Linear or Jira. Technical plans, QA test cases, and execution traces are subtasks and comments — not external files.
+  </Card>
+  
+  <Card title="Story point estimation" icon="chart-line">
+    Planning agent applies Fibonacci points (2, 3, 5, 8, 13) to parent issues and flags large work for human review before implementation.
+  </Card>
+  
+  <Card title="PR review with findings" icon="magnifying-glass">
+    Diff-first review focuses on regression risk and criteria mismatch. Blocking findings route back to implementation with scoped fix guidance.
+  </Card>
+</CardGroup>
+
+## How it works
+
+The workflow runs as a pipeline of specialized agent skills:
+
+<Steps>
+  <Step title="Requirements gathering">
+    `requirements-ticket-agent` converts informal requests into structured tickets with Context, Goal, Scope, Constraints, and Acceptance Criteria.
+  </Step>
+  
+  <Step title="Triage and routing">
+    `triage-agent` classifies work as trivial, standard, or complex and sets `skip_steps` guidance for downstream efficiency.
+  </Step>
+  
+  <Step title="Technical planning">
+    `planning-agent` reads the ticket, inspects the live codebase, and creates a Technical Plan subtask plus up to 8 implementation subtasks.
+  </Step>
+  
+  <Step title="QA planning (parallel)">
+    `qa-agent` creates ticket-native test cases from requirements and implementation subtasks. Runs in parallel without blocking.
+  </Step>
+  
+  <Step title="Implementation and PR publish">
+    `implementation-agent` executes subtasks in sequence, records build/lint outcomes, and publishes the PR in the same run.
+  </Step>
+  
+  <Step title="PR review">
+    `pr-review-agent` performs diff-first review with severity-ranked findings. Routes back to implementation when fixes needed.
+  </Step>
+</Steps>
+
+## Core design principles
+
+### The code is the architecture document
+
+Rather than requiring pre-built architecture snapshots that drift out of date, `planning-agent` reads the ticket requirements, navigates the live codebase using search and file-reading tools, and produces a short, precise technical plan grounded in what the code actually looks like right now.
+
+This means:
+- No architecture initialization ritual before every ticket
+- The coding agent always sees the real, current state of the code
+- Less maintenance overhead; fewer stale context files confusing the agent
+- Implementation subtasks reference actual file paths and existing patterns — not guesses from an outdated doc
+
+<Tip>
+  You can still create or maintain architecture docs. Pass them as optional context when invoking `planning-agent`, and the agent will read them alongside the live code.
+</Tip>
+
+### Tracker audit trail contract
+
+All tracker-writing skills must leave an explicit audit trail. A run is incomplete unless all items below are present:
+
+- Rich artifact content (issue/subtask body), not title-only updates
+- `Reasoning` section that explains why the agent chose the proposed scope/plan
+- `References` section listing exact inputs used (ticket fields, child tasks, files, PR links, commands when relevant)
+- `Assumptions` section with unresolved unknowns and inferred decisions
+- Parent issue comment named `Execution-Trace` with:
+  - actions performed (in order)
+  - key decisions
+  - blockers/open questions
+  - `Skill-Version` stamp
+
+### JSON contract for deterministic chaining
+
+In addition to readable markdown sections, each agent must emit machine-parseable JSON blocks for deterministic chaining and validation.
+
+**Execution-Trace JSON contract:**
+
+```json
+{
+  "agent": "planning-agent",
+  "skill_version": "planning-agent@0.0.1",
+  "timestamp_utc": "2026-02-22T10:30:00Z",
+  "actions": ["read_parent_issue", "inspected_codebase", "created_technical_plan"],
+  "decisions": ["split_api_and_ui_work", "deferred_non_blocking_cleanup"],
+  "blockers": [],
+  "open_questions": [],
+  "references": ["LIN-123", "src/routes/v1/router.ts", "src/models/order.ts"]
+}
+```
+
+**Workflow-Handoff JSON contract:**
+
+```json
+{
+  "from_agent": "planning-agent",
+  "to_agent": "implementation-agent",
+  "status": "ready|blocked",
+  "required_tags": ["planning-done"],
+  "open_question_tags": [],
+  "summary": "Technical plan posted. Implementation subtasks created and prioritized.",
+  "artifacts": ["LIN-456", "LIN-457", "LIN-458"],
+  "next_actions": ["implement_subtasks_in_order", "publish_pr_when_complete"]
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="play" href="/quickstart">
+    Install Open Orchestra and run your first skill in under 5 minutes
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup instructions and configuration options
+  </Card>
+  
+  <Card title="Available skills" icon="toolbox" href="/skills/requirements-ticket-agent">
+    Complete reference for all 6 workflow skills
+  </Card>
+  
+  <Card title="Workflow tags" icon="tags" href="/reference/workflow-tags">
+    Tag contracts for stage completion and open-question handling
+  </Card>
+</CardGroup>

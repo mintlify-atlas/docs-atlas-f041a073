@@ -1,0 +1,412 @@
+---
+title: JSON contracts
+description: Machine-parseable JSON schemas for audit trail and workflow handoff
+---
+
+In addition to readable markdown sections, each Open Orchestra agent emits machine-parseable JSON blocks for deterministic chaining and validation. This ensures consistency across agent runs and enables downstream agents to parse context reliably.
+
+## Contract requirements
+
+All agents must follow these JSON contract rules:
+
+<ResponseField name="Valid JSON objects" required>
+  No comments, no trailing commas, and strict adherence to JSON spec.
+</ResponseField>
+
+<ResponseField name="Stable key names" required>
+  Keep key names consistent so downstream agents can parse reliably.
+</ResponseField>
+
+<ResponseField name="Blocked status handling" required>
+  If `status` is `blocked`, include at least one `open_question_tags` entry and describe the blocker in `summary`.
+</ResponseField>
+
+## Execution-Trace contract
+
+The `Execution-Trace` JSON contract provides a complete audit trail of what an agent did, what it decided, and what blockers or questions remain.
+
+### Schema
+
+```json
+{
+  "agent": "planning-agent",
+  "skill_version": "planning-agent@0.0.1",
+  "timestamp_utc": "2026-02-22T10:30:00Z",
+  "actions": [
+    "read_parent_issue",
+    "inspected_codebase",
+    "created_technical_plan",
+    "created_implement_subtasks",
+    "estimated_story_points"
+  ],
+  "decisions": [
+    "split_api_and_ui_work",
+    "deferred_non_blocking_cleanup"
+  ],
+  "blockers": [],
+  "open_questions": [],
+  "references": [
+    "LIN-123",
+    "src/routes/v1/router.ts",
+    "src/models/order.ts"
+  ]
+}
+```
+
+### Field definitions
+
+<ResponseField name="agent" type="string" required>
+  Name of the agent that created this trace (e.g., `planning-agent`, `implementation-agent`).
+</ResponseField>
+
+<ResponseField name="skill_version" type="string" required>
+  Version stamp in format `<agent-name>@<version>` (e.g., `planning-agent@0.0.1`).
+  
+  This enables traceability and debugging when agent behavior changes across versions.
+</ResponseField>
+
+<ResponseField name="timestamp_utc" type="string" required>
+  ISO 8601 timestamp in UTC (e.g., `2026-02-22T10:30:00Z`).
+</ResponseField>
+
+<ResponseField name="actions" type="array" required>
+  Ordered list of actions performed during this agent run.
+  
+  **Example actions:**
+  - `read_parent_issue`
+  - `inspected_codebase`
+  - `created_technical_plan`
+  - `created_implement_subtasks`
+  - `estimated_story_points`
+  - `ran_build`
+  - `published_pr`
+</ResponseField>
+
+<ResponseField name="decisions" type="array" required>
+  Key decisions made by the agent during this run.
+  
+  **Example decisions:**
+  - `split_api_and_ui_work`
+  - `deferred_non_blocking_cleanup`
+  - `used_existing_auth_pattern`
+  - `created_new_service_module`
+</ResponseField>
+
+<ResponseField name="blockers" type="array" required>
+  List of blockers encountered. Empty array if none.
+  
+  When blockers are present, the agent must also add the corresponding `open-*-questions` tag.
+</ResponseField>
+
+<ResponseField name="open_questions" type="array" required>
+  List of unresolved questions. Empty array if none.
+  
+  When questions are present, the agent must set handoff status to `blocked`.
+</ResponseField>
+
+<ResponseField name="references" type="array" required>
+  Exact inputs used during this run (ticket IDs, file paths, PR links, commands).
+  
+  **Example references:**
+  - `LIN-123` (parent issue ID)
+  - `src/routes/v1/router.ts` (file inspected)
+  - `PR-456` (pull request reviewed)
+  - `pnpm build` (command executed)
+</ResponseField>
+
+### Where it appears
+
+The `Execution-Trace` JSON is embedded in the parent issue comment as part of the `execution_trace` field within the handoff comment.
+
+See [Workflow-Handoff contract](#workflow-handoff-contract) for how this trace is included in agent handoffs.
+
+## Workflow-Handoff contract
+
+The `Workflow-Handoff` JSON contract enables deterministic chaining between agents. Each agent reads the previous agent's handoff to understand context, then writes its own handoff for the next agent.
+
+### Schema
+
+```json
+{
+  "from_agent": "planning-agent",
+  "to_agent": "implementation-agent",
+  "status": "ready",
+  "required_tags": ["planning-done"],
+  "open_question_tags": [],
+  "summary": "Technical plan posted. Implementation subtasks created and prioritized.",
+  "artifacts": ["LIN-456", "LIN-457", "LIN-458"],
+  "next_actions": [
+    "implement_subtasks_in_order",
+    "publish_pr_when_complete"
+  ]
+}
+```
+
+### Field definitions
+
+<ResponseField name="from_agent" type="string" required>
+  Name of the agent creating this handoff (e.g., `planning-agent`).
+</ResponseField>
+
+<ResponseField name="to_agent" type="string" required>
+  Name of the next agent that should consume this handoff (e.g., `implementation-agent`).
+</ResponseField>
+
+<ResponseField name="status" type="enum" required>
+  Handoff status. Valid values:
+  - `ready`: Next agent can proceed
+  - `blocked`: Open questions must be resolved before proceeding
+</ResponseField>
+
+<ResponseField name="required_tags" type="array" required>
+  List of workflow tags that must be present on the parent issue before the next agent starts.
+  
+  **Example:** `["planning-done"]`
+</ResponseField>
+
+<ResponseField name="open_question_tags" type="array" required>
+  List of `open-*-questions` tags that are blocking progression. Empty array if none.
+  
+  **Example:** `["open-planning-questions"]`
+  
+  When this array is non-empty, `status` must be `blocked`.
+</ResponseField>
+
+<ResponseField name="summary" type="string" required>
+  Human-readable summary of what was accomplished in this stage.
+  
+  If status is `blocked`, this should describe the blocker.
+</ResponseField>
+
+<ResponseField name="artifacts" type="array" required>
+  List of artifact IDs created during this stage (subtask IDs, PR numbers, etc.).
+  
+  **Example:** `["LIN-456", "LIN-457", "LIN-458"]` (implementation subtasks)
+</ResponseField>
+
+<ResponseField name="next_actions" type="array" required>
+  Guidance for the next agent on what to do.
+  
+  **Example:**
+  - `implement_subtasks_in_order`
+  - `publish_pr_when_complete`
+  - `review_pr_for_security_risks`
+</ResponseField>
+
+### Where it appears
+
+The `Workflow-Handoff` JSON is posted as a parent issue comment with:
+
+1. Stage-specific heading (e.g., `## Handing Off for Planning`)
+2. HTML comment marker: `<!-- OPEN-ORCHESTRA-HANDOFF -->`
+3. JSON code block containing the handoff
+
+**Example comment structure:**
+
+```markdown
+## Handing Off for Planning
+
+<!-- OPEN-ORCHESTRA-HANDOFF -->
+```json
+{
+  "from_agent": "planning-agent",
+  "to_agent": "implementation-agent",
+  "status": "ready",
+  "required_tags": ["planning-done"],
+  "open_question_tags": [],
+  "summary": "Technical plan posted. Implementation subtasks created and prioritized.",
+  "artifacts": ["LIN-456", "LIN-457", "LIN-458"],
+  "next_actions": [
+    "implement_subtasks_in_order",
+    "publish_pr_when_complete"
+  ]
+}
+```
+```
+
+## Enhanced handoff schema
+
+Some agents use an enhanced handoff schema with additional fields for token-efficient context loading.
+
+### Enhanced schema example
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. read_parent_issue\n2. inspected_codebase\nDecisions:\n- split_api_and_ui_work\nReferences:\n- LIN-123\n- src/routes/v1/router.ts\nAssumptions:\n- existing auth pattern is reusable\nOpen-Questions: none\nSkill-Version: planning-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "planning-agent",
+    "to_skill": "implementation-agent",
+    "status": "ready",
+    "delta": ["created 5 implementation subtasks", "estimated 5 story points"],
+    "key_decisions": [
+      {
+        "decision": "split_api_and_ui_work",
+        "reason": "API changes have separate testing requirements"
+      }
+    ],
+    "relevant_artifacts": [
+      {
+        "artifact": "implementation-subtasks",
+        "hash": "sha256:abc123...",
+        "last_modified": "2026-02-22T10:30:00Z",
+        "summary": "5 subtasks covering API and UI work"
+      }
+    ],
+    "open_blockers": [],
+    "next_guidance": {
+      "need_full": ["implementation-subtasks"],
+      "focus": ["implement API changes first, then UI"]
+    }
+  }
+}
+```
+
+### Enhanced field definitions
+
+<ResponseField name="execution_trace" type="string">
+  Embedded markdown string containing the full `Execution-Trace` in human-readable format.
+  
+  This allows agents to read the trace without parsing JSON.
+</ResponseField>
+
+<ResponseField name="handoff_summary" type="object">
+  Structured handoff object with token-efficient context loading support.
+</ResponseField>
+
+<ResponseField name="handoff_summary.delta" type="array">
+  What changed in this stage's output (e.g., "created 5 implementation subtasks").
+</ResponseField>
+
+<ResponseField name="handoff_summary.key_decisions" type="array">
+  Array of decision objects with `decision` and `reason` fields.
+</ResponseField>
+
+<ResponseField name="handoff_summary.relevant_artifacts" type="array">
+  Array of artifact objects with metadata:
+  - `artifact`: artifact name
+  - `hash`: SHA-256 hash for change detection
+  - `last_modified`: ISO 8601 timestamp
+  - `summary`: short relevance summary
+  
+  Downstream agents can check hashes to determine if they need to re-read artifacts.
+</ResponseField>
+
+<ResponseField name="handoff_summary.open_blockers" type="array">
+  Array of blocker objects with `blocker`, `owner`, and `next_action` fields.
+</ResponseField>
+
+<ResponseField name="handoff_summary.next_guidance" type="object">
+  Guidance for the next agent:
+  - `need_full`: list of artifact names the next agent must read in full
+  - `focus`: list of high-priority items or sequencing hints
+</ResponseField>
+
+<Note>
+  The enhanced handoff summary must be ≤ 600 tokens to ensure efficient context loading.
+</Note>
+
+## Context gathering order
+
+To minimize token usage, agents must follow this strict context gathering order:
+
+1. **Locate the most recent `<!-- OPEN-ORCHESTRA-HANDOFF -->` comment** from the previous skill
+2. **Parse the JSON** inside it; treat `handoff_summary` as primary context
+3. **Review `relevant_artifacts` and hashes** first
+4. **Declare exactly which artifacts require full reads** via `need_full`
+5. **Read full content only if:**
+   - Hash has changed since last read, OR
+   - The task cannot proceed without it
+6. **Do not read entire issue history** or all prior execution traces by default
+
+<Warning>
+  Agents must not reconstruct state by reading full comment history. Always use the handoff summary first and lazy-load only required artifacts.
+</Warning>
+
+## Example: Blocked handoff
+
+When an agent encounters a blocker, the handoff must reflect this:
+
+```json
+{
+  "from_agent": "planning-agent",
+  "to_agent": "implementation-agent",
+  "status": "blocked",
+  "required_tags": ["planning-done"],
+  "open_question_tags": ["open-planning-questions"],
+  "summary": "Planning blocked: unclear whether to use REST or GraphQL API. Requires product decision.",
+  "artifacts": [],
+  "next_actions": [
+    "wait_for_api_architecture_decision"
+  ]
+}
+```
+
+**What happens next:**
+
+1. `planning-agent` adds the `open-planning-questions` tag to the parent issue
+2. `planning-agent` posts the blocked handoff comment
+3. `planning-agent` stops execution
+4. Human or upstream agent resolves the question
+5. `planning-agent` re-runs with updated context
+6. `planning-agent` removes `open-planning-questions` and posts a new handoff with `status: ready`
+
+## Example: Ready handoff with rework mode
+
+When `pr-review-agent` finds issues and hands back to `implementation-agent`, it includes `findings` in `next_guidance`:
+
+```json
+{
+  "handoff_summary": {
+    "from_skill": "pr-review-agent",
+    "to_skill": "implementation-agent",
+    "status": "ready",
+    "delta": ["found 3 medium-severity findings"],
+    "key_decisions": [
+      {
+        "decision": "require_rework",
+        "reason": "SQL injection risk in user input handling"
+      }
+    ],
+    "relevant_artifacts": [
+      {
+        "artifact": "pr-review-findings",
+        "hash": "sha256:def456...",
+        "last_modified": "2026-02-22T11:00:00Z",
+        "summary": "3 findings requiring code changes"
+      }
+    ],
+    "open_blockers": [],
+    "next_guidance": {
+      "need_full": ["pr-review-findings"],
+      "focus": ["fix SQL injection in src/handlers/user.ts:42"],
+      "findings": [
+        {
+          "id": "FINDING-001",
+          "file": "src/handlers/user.ts",
+          "action": "sanitize user input before SQL query"
+        },
+        {
+          "id": "FINDING-002",
+          "file": "src/handlers/user.ts",
+          "action": "add input validation"
+        },
+        {
+          "id": "FINDING-003",
+          "file": "tests/user.test.ts",
+          "action": "add test for SQL injection prevention"
+        }
+      ]
+    }
+  }
+}
+```
+
+**What happens next:**
+
+1. `implementation-agent` detects `rework_mode` based on `from_skill: pr-review-agent`
+2. `implementation-agent` reads only `next_guidance.findings`
+3. `implementation-agent` fixes the 3 findings
+4. `implementation-agent` updates the existing PR
+5. `implementation-agent` hands back to `pr-review-agent`
+
+This rework mode minimizes token usage by avoiding full context re-reads.

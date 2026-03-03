@@ -1,0 +1,177 @@
+---
+title: Triage agent
+description: Performs lightweight workflow triage on a parent issue, classifies execution track as trivial, standard, or complex, and sets skip_steps guidance.
+---
+
+The triage agent classifies incoming work into execution tracks and defines skip-steps guidance so downstream skills can run with minimal context and token cost.
+
+## Purpose and when to invoke
+
+This agent performs lightweight workflow triage to classify work complexity and optimize downstream execution.
+
+**Invoke when:**
+- After a parent issue already exists in the tracker
+- At workflow start for an existing parent issue that has not yet been triaged
+- When scope changes materially and track classification needs refresh
+
+## Required inputs
+
+<ParamField path="parent_issue_id" type="string" required>
+  Parent issue ID
+</ParamField>
+
+<ParamField path="parent_issue" type="object" required>
+  Parent issue with at least baseline context (title + description or equivalent requirements artifact)
+</ParamField>
+
+<ParamField path="workflow_tags" type="array">
+  Current workflow tags/labels on parent issue
+</ParamField>
+
+<ParamField path="handoff_comment" type="object">
+  Latest previous handoff comment (if present)
+</ParamField>
+
+## Runtime configuration
+
+The agent reads `/orchestra-config.json` from the repository root before starting. If missing, it creates the file with:
+
+```json
+{ "issue_tracker": "linear" }
+```
+
+For every tracker operation, the agent includes: `Skill-Version: triage-agent@0.0.1`
+
+<Warning>
+  If the configured issue tracker MCP is unavailable, the agent stops immediately and does not proceed.
+</Warning>
+
+## Outputs
+
+The agent produces:
+
+- **Compact handoff comment** for the next stage with wrapped JSON block
+- **Existing workflow tags** remain unchanged (tags remain the trigger mechanism)
+
+### Handoff format
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. <action>\n2. <action>\nDecisions:\n- <decision + reason>\nReferences:\n- <source>\nAssumptions:\n- <assumption>\nOpen-Questions: none|<question list>\nSkill-Version: triage-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "triage-agent",
+    "to_skill": "requirements-ticket-agent|planning-agent",
+    "status": "ready|blocked",
+    "delta": ["<what changed since prior handoff>"],
+    "key_decisions": [{"decision": "<decision>", "reason": "<why>"}],
+    "relevant_artifacts": [
+      {
+        "artifact": "<name>",
+        "hash": "sha256:<hash>",
+        "last_modified": "<ISO-8601>",
+        "summary": "<why this artifact matters>"
+      }
+    ],
+    "open_blockers": [{"blocker": "<text>", "owner": "<owner>", "next_action": "<action>"}],
+    "next_guidance": {
+      "track": "trivial|standard|complex",
+      "skip_steps": ["<skill-name>"],
+      "need_full": ["<artifact names to fully read next>"]
+    }
+  }
+}
+```
+
+<Note>
+  The `handoff_summary` must be ≤ 600 tokens.
+</Note>
+
+## Procedure
+
+<Steps>
+  <Step title="Read configuration and verify tracker">
+    Read `/orchestra-config.json`, set tracker context, and verify the configured issue tracker MCP is available.
+  </Step>
+
+  <Step title="Execute context gathering">
+    Follow the strict context gathering order:
+    1. Locate the most recent `<!-- OPEN-ORCHESTRA-HANDOFF -->` comment
+    2. Parse the JSON inside it as primary context
+    3. Look at `relevant_artifacts` list and hashes
+    4. Declare exactly which artifacts you need via `need_full`
+    5. Only read full content if hash changed or explicitly required
+    6. Do not read entire issue history or all prior execution traces
+  </Step>
+
+  <Step title="Determine readiness route">
+    Determine readiness route from tags/context:
+    - Route to `requirements-ticket-agent` when requirements are missing/ambiguous or `open-requirements-questions` is present
+    - Route to `planning-agent` when requirements are complete (`requirements-done`) and planning is not yet done
+  </Step>
+
+  <Step title="Classify execution track">
+    Classify track based on complexity:
+
+    **Trivial:** Isolated change, low regression risk, no cross-module impact
+
+    **Standard:** Moderate scope, known patterns, normal implementation/review flow
+
+    **Complex:** Cross-module/API/data contract/security/runtime impact or high ambiguity
+  </Step>
+
+  <Step title="Build skip_steps guidance">
+    Build `skip_steps` guidance (empty when full standard flow is required). Only skip a stage when required artifacts already exist and no corresponding `open-*-questions` tag is present.
+  </Step>
+
+  <Step title="Post handoff and route">
+    Keep tags unchanged except normal stage tags already defined by workflow policy. Post the handoff comment and route to the next skill using existing tag/label triggers and the `next_guidance` payload.
+  </Step>
+</Steps>
+
+## Decision heuristics
+
+### Complexity signals
+
+<Accordion title="Trivial track">
+  - Single-component/single-file intent
+  - No API/schema/permission/runtime contract changes
+  - Clear acceptance criteria
+</Accordion>
+
+<Accordion title="Standard track">
+  - Bounded multi-file change with known pattern reuse
+  - Moderate regression surface
+  - No critical contract shifts
+</Accordion>
+
+<Accordion title="Complex track">
+  - Cross-service/module coupling
+  - API/schema/contract changes
+  - Security/privacy implications
+  - Migration/rollout concerns
+  - Unresolved ambiguity
+</Accordion>
+
+### Routing signals
+
+- Prefer `requirements-ticket-agent` if intent is not testable as written
+- Route to `planning-agent` once requirements are done; planning now inspects the live codebase and produces technical context without requiring pre-built architecture documents
+
+### Confidence rule
+
+If confidence is low, mark `status: blocked`, list blockers in `open_blockers`, and avoid aggressive `skip_steps`.
+
+## Guardrails
+
+<Warning>
+  The agent must follow these constraints:
+</Warning>
+
+- Do not read full issue history by default
+- Do not read all artifacts by default
+- Do not modify existing workflow tag contracts
+- Do not emit handoff payloads over 600 tokens
+
+## Handoff
+
+Primary consumer: `requirements-ticket-agent` (when requirements are incomplete) or `planning-agent` (when requirements are done), with `next_guidance.track` and `next_guidance.skip_steps` as routing hints.

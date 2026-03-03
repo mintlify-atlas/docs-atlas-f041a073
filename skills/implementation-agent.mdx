@@ -1,0 +1,177 @@
+---
+title: Implementation agent
+description: Implements tracker subtasks tagged implement, publishes or updates the PR, and routes review using handoff-first context loading and rework mode support.
+---
+
+The implementation agent implements the parent issue by executing planned implementation subtasks and handling PR publication in the same run with token-efficient context loading and auditable stage handoff.
+
+## Purpose and when to invoke
+
+This agent transforms technical plans into working code and manages the PR lifecycle.
+
+**Invoke when:**
+- After planning is complete on the parent issue
+- After PR review requests implementation rework
+
+## Required inputs
+
+<ParamField path="parent_issue_id" type="string" required>
+  Parent issue ID
+</ParamField>
+
+<ParamField path="parent_status" type="string" required>
+  Parent issue status is `In-progress`
+</ParamField>
+
+<ParamField path="planning_done_tag" type="boolean" required>
+  Parent issue has tag `planning-done`
+</ParamField>
+
+<ParamField path="implementation_subtasks" type="array" required>
+  Child subtasks tagged `implement`
+</ParamField>
+
+<ParamField path="handoff_comment" type="object" required>
+  Most recent prior handoff comment in `<!-- OPEN-ORCHESTRA-HANDOFF -->` format
+</ParamField>
+
+## Runtime configuration
+
+The agent reads `/orchestra-config.json` from the repository root before starting.
+
+For every tracker operation, the agent includes: `Skill-Version: implementation-agent@0.0.1`
+
+<Warning>
+  The agent immediately stops if `gh` CLI or the configured issue tracker MCP is unavailable.
+</Warning>
+
+## Outputs
+
+The agent produces:
+
+- **Code changes** implementing all completable `implement` subtasks
+- **Git branch** created as: `codex/<issue-id>-<short-description>`
+- **Completed subtasks** marked done in the configured issue tracker
+- **Comments** on each incomplete subtask explaining why it was not completed
+- **Build and lint outcomes** recorded in the tracker as command + pass/fail, with short error excerpts only when failing
+- **Branch pushed** to remote when work is complete
+- **Pull request** created (first pass) or updated (rework pass) and linked to the tracker issue
+- **Parent issue status** moved to `In review` after successful publish/update
+
+- **Parent issue tags:**
+  - `implementation-done` when implementation is complete
+  - `pr-published` when PR is created or updated and linked
+  - `open-implementation-questions` when implementation is blocked
+
+- **Handoff comment** with wrapped JSON block
+
+### Handoff format
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. <action>\n2. <action>\nDecisions:\n- <decision + reason>\nReferences:\n- <source artifact or command>\nAssumptions:\n- <assumption>\nOpen-Questions: none|<question list>\nSkill-Version: implementation-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "implementation-agent",
+    "to_skill": "pr-review-agent",
+    "status": "ready|blocked",
+    "delta": ["<what changed in this implementation pass>"],
+    "key_decisions": [{"decision": "<decision>", "reason": "<reason>"}],
+    "relevant_artifacts": [
+      {
+        "artifact": "<artifact name>",
+        "hash": "sha256:<hash>",
+        "last_modified": "<ISO-8601>",
+        "summary": "<short relevance summary>"
+      }
+    ],
+    "open_blockers": [{"blocker": "<text>", "owner": "<owner>", "next_action": "<next action>"}],
+    "next_guidance": {
+      "need_full": ["<artifact names needed by next skill>"],
+      "focus": ["<highest-priority checks for next skill>"],
+      "findings": [{"id": "<finding-id>", "file": "<path>", "action": "<required fix/check>"}]
+    }
+  }
+}
+```
+
+<Note>
+  The `handoff_summary` must be ≤ 600 tokens.
+</Note>
+
+## Procedure
+
+<Steps>
+  <Step title="Read configuration and validate">
+    Read `/orchestra-config.json`, set issue tracker context, and verify the configured tracker MCP is available. Execute the strict context gathering order. Validate prerequisites: parent issue status is `In-progress` and parent has `planning-done`.
+  </Step>
+
+  <Step title="Determine execution mode">
+    Determine mode:
+
+    **Standard mode:** Previous handoff is from planning/earlier implementation stage
+
+    **Rework mode:** Previous handoff is from `pr-review-agent` and includes `next_guidance.findings`
+
+    In rework mode, read only:
+    - `next_guidance.findings` from the review handoff
+    - Affected `implement` subtasks referenced by those findings
+    - Additional artifacts only if explicitly declared in `need_full`
+  </Step>
+
+  <Step title="Create branch and implement">
+    Create a git branch named `codex/<issue-id>-<short-description>` if one is not already active. Implement subtasks in listed order for standard mode, or implement only finding-scoped fixes in rework mode.
+  </Step>
+
+  <Step title="Update subtasks">
+    After finishing work, mark completed subtasks done and add blocker comments for any incomplete subtask.
+  </Step>
+
+  <Step title="Run build and lint">
+    Detect build and lint commands from repository config (for example `package.json`, `Makefile`, or equivalent). Run build and lint commands and record concise results.
+  </Step>
+
+  <Step title="Handle blockers or finalize">
+    If implementation is blocked:
+    - Add `open-implementation-questions`
+    - Post handoff JSON with `status: blocked` and concrete `open_blockers`
+    - Stop and wait for clarifications
+
+    If implementation is complete:
+    - Remove `open-implementation-questions` if present
+    - Add tag `implementation-done`
+    - Optionally keep legacy tag `implemented` during migration windows
+  </Step>
+
+  <Step title="Publish PR">
+    Push branch to origin (`git push -u origin <branch>`). If linked PR already exists (typical rework mode), update the existing PR context/comments. Otherwise create a PR targeting the base branch and include tracker issue ID/URL.
+
+    Ensure parent issue tag `pr-published` is present. Add concise parent issue comment with PR URL and short review request. Move parent issue status to `In review`.
+
+    Post handoff JSON with `to_skill: pr-review-agent` and `status: ready`.
+  </Step>
+
+  <Step title="Invoke next agent">
+    Invoke `pr-review-agent` with the same parent issue ID unless `open-implementation-questions` is present.
+  </Step>
+</Steps>
+
+## Guardrails
+
+<Warning>
+  The agent must follow these constraints:
+</Warning>
+
+- Do not start implementation unless parent issue has `planning-done` and status `In-progress`
+- Do not execute subtasks that are not tagged `implement`
+- Do not change scope outside planned subtasks without explicit tracker approval
+- Do not leave incomplete subtasks without a blocker comment
+- Do not run tracker operations unless the MCP for the configured issue tracker is available
+- Do not paste full command output (for example full `pnpm list` or `pnpm build` logs) into tracker or PR comments
+- Do not reconstruct state by reading full comment history; use handoff summary first, then lazy-load only required artifacts
+- Do not create or update a PR if there are no committed changes from this implementation pass
+- Do not move issue status to `In review` until PR creation/update succeeds
+- Ensure the PR references the correct tracker issue ID and URL
+
+## Handoff
+
+Primary consumer: `pr-review-agent` (auto-invoke when unblocked).

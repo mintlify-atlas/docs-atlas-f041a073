@@ -1,0 +1,189 @@
+---
+title: Workflow tags
+description: Understand the workflow completion and open-question tags used across Open Orchestra agents
+---
+
+Workflow tags provide a standardized way to track progress and blockers across the Open Orchestra agent workflow. Every agent reads and writes specific tags to communicate stage completion and open questions.
+
+## Tag contract
+
+Parent issue tags follow a strict contract. Each agent writes completion tags when a stage finishes successfully and open-question tags when blockers arise.
+
+### How tags flow through the workflow
+
+1. `triage-agent` classifies the issue and routes to the next stage
+2. `requirements-ticket-agent` (conditional) adds `requirements-done` when requirements are complete
+3. `planning-agent` adds `planning-done` when technical planning is complete
+4. `qa-agent` adds `qa-done` when QA planning is complete (runs in parallel)
+5. `implementation-agent` adds `implementation-done` and `pr-published` when code is complete and PR is created
+6. `pr-review-agent` adds `pr-reviewed` when review is complete
+
+## Completion tags
+
+These tags indicate that a workflow stage has successfully completed.
+
+<ResponseField name="requirements-done" type="tag">
+  Requirements are complete and acceptance criteria are defined. Set by `requirements-ticket-agent`.
+  
+  **Prerequisite for:** `planning-agent`
+</ResponseField>
+
+<ResponseField name="planning-done" type="tag">
+  Technical plan and implementation subtasks have been created. Set by `planning-agent`.
+  
+  **Prerequisite for:** `implementation-agent`
+</ResponseField>
+
+<ResponseField name="qa-done" type="tag">
+  QA plan subtask has been created with ticket-native test cases. Set by `qa-agent`.
+  
+  **Note:** This is a parallel quality gate and does not block implementation.
+</ResponseField>
+
+<ResponseField name="implementation-done" type="tag">
+  All implementation subtasks are complete and code changes are committed. Set by `implementation-agent`.
+  
+  **Prerequisite for:** `pr-review-agent`
+</ResponseField>
+
+<ResponseField name="pr-published" type="tag">
+  Pull request has been created or updated and linked to the tracker issue. Set by `implementation-agent`.
+  
+  **Note:** PR publication happens in the same run as implementation.
+</ResponseField>
+
+<ResponseField name="pr-reviewed" type="tag">
+  PR review is complete with merge recommendation or rework findings. Set by `pr-review-agent`.
+</ResponseField>
+
+## Open-question tags
+
+These tags indicate that an agent is blocked and requires clarification before proceeding. Each tag is agent-scoped.
+
+<ResponseField name="open-requirements-questions" type="tag">
+  Requirements stage has unresolved questions. Set by `requirements-ticket-agent`.
+  
+  **Blocks:** `planning-agent` cannot start until this is resolved
+</ResponseField>
+
+<ResponseField name="open-planning-questions" type="tag">
+  Planning stage has unresolved questions. Set by `planning-agent`.
+  
+  **Blocks:** `implementation-agent` cannot start until this is resolved
+</ResponseField>
+
+<ResponseField name="open-qa-questions" type="tag">
+  QA planning stage has unresolved questions. Set by `qa-agent`.
+  
+  **Note:** Does not block implementation, but should be resolved for full quality coverage
+</ResponseField>
+
+<ResponseField name="open-implementation-questions" type="tag">
+  Implementation stage has unresolved questions. Set by `implementation-agent`.
+  
+  **Blocks:** `pr-review-agent` cannot start until this is resolved
+</ResponseField>
+
+<ResponseField name="open-pr-review-questions" type="tag">
+  PR review stage has unresolved questions. Set by `pr-review-agent`.
+  
+  **Blocks:** Issue cannot be closed until this is resolved
+</ResponseField>
+
+## Legacy tags
+
+During workflow migration, some legacy tags are still accepted as valid prerequisites.
+
+<Note>
+  The following tags are deprecated but still recognized during the transition period:
+  
+  - `architecture-done` (replaced by codebase inspection in `planning-agent`)
+  - `qa-plan-created` (replaced by `qa-done`)
+  - `implemented` (replaced by `implementation-done`)
+</Note>
+
+## Tag usage rules
+
+### Reading tags
+
+Each agent must check for required prerequisite tags before starting work. If prerequisites are missing, the agent must:
+
+1. Add a blocking comment on the parent issue
+2. Stop execution
+3. Do not create artifacts or change issue state
+
+### Writing tags
+
+When an agent completes its stage:
+
+1. Remove the corresponding `open-*-questions` tag if present
+2. Add the completion tag (e.g., `planning-done`)
+3. Post a `Workflow-Handoff` comment with status `ready`
+
+When an agent encounters a blocker:
+
+1. Add the corresponding `open-*-questions` tag
+2. Post a `Workflow-Handoff` comment with status `blocked`
+3. Include explicit `open_blockers` in the handoff JSON
+4. Stop and wait for clarifications
+
+### Tag verification
+
+<Warning>
+  Never assume a tag is present based on workflow position. Always verify prerequisite tags exist before starting work.
+</Warning>
+
+## Handoff comments
+
+Every agent writes a `Workflow-Handoff` comment block with a stage-specific heading. The next agent reads only the previous agent's handoff block for open-question checks.
+
+Each handoff comment includes:
+
+- Stage heading (e.g., "## Handing Off for Planning")
+- HTML comment marker: `<!-- OPEN-ORCHESTRA-HANDOFF -->`
+- JSON block with `execution_trace` and `handoff_summary`
+- Status indicator: `ready` or `blocked`
+
+See [JSON contracts](/reference/json-contracts) for the complete handoff schema.
+
+## Example workflow progression
+
+Here's how tags evolve for a standard issue:
+
+```
+Issue created
+  ↓
+[requirements-ticket-agent runs]
+  → adds: requirements-done
+  ↓
+[planning-agent runs]
+  → adds: planning-done, story-point-5
+  ↓
+[qa-agent runs in parallel]
+  → adds: qa-done
+  ↓
+[implementation-agent runs]
+  → adds: implementation-done, pr-published
+  ↓
+[pr-review-agent runs]
+  → adds: pr-reviewed
+  ↓
+Issue closed
+```
+
+If any stage encounters questions:
+
+```
+[planning-agent encounters ambiguity]
+  → adds: open-planning-questions
+  → posts handoff with status: blocked
+  → stops execution
+  ↓
+[Human clarifies]
+  ↓
+[planning-agent re-runs]
+  → removes: open-planning-questions
+  → adds: planning-done
+  → posts handoff with status: ready
+  → continues to implementation-agent
+```

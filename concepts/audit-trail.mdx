@@ -1,0 +1,324 @@
+---
+title: Audit trail
+description: Learn the audit trail contract that ensures all agent runs are auditable, traceable, and complete.
+---
+
+Open Orchestra enforces an explicit audit trail contract for all tracker-writing agents. This ensures every agent run is auditable, traceable, and provides sufficient context for debugging and continuity.
+
+## Why audit trails matter
+
+When agents work autonomously across multiple stages, teams need:
+- **Visibility** into what each agent did and why
+- **Traceability** from decisions back to source artifacts
+- **Reproducibility** when debugging issues or resuming interrupted work
+- **Accountability** with explicit assumptions and unknowns
+
+Without structured audit trails, agent workflows become black boxes.
+
+## The audit trail contract
+
+All tracker-writing skills must leave an explicit audit trail. A run is **incomplete** unless all items below are present:
+
+### 1. Rich artifact content
+
+Every created issue or subtask must have a **complete body**, not just a title.
+
+<Warning>
+Title-only updates are not acceptable. Every artifact must include all required body sections.
+</Warning>
+
+**Required sections for most artifacts:**
+- Context or objective
+- Scope or implementation notes
+- Reasoning
+- References
+- Assumptions
+
+### 2. Reasoning section
+
+Explain **why** the agent chose the proposed scope, plan, or decomposition.
+
+**Example (from planning-agent):**
+```text
+Reasoning:
+- Split API and UI work into separate subtasks because they can be implemented independently
+- Deferred non-blocking cleanup to reduce story points from 8 to 5
+- Grouped related route changes to minimize context switching
+```
+
+### 3. References section
+
+List **exact inputs** used to make decisions.
+
+**Example (from planning-agent):**
+```text
+References:
+- LIN-123 (parent issue)
+- src/routes/v1/router.ts (existing route patterns)
+- src/models/order.ts (data model)
+- src/services/export-service.ts (existing export logic)
+```
+
+**Example (from implementation-agent):**
+```text
+References:
+- LIN-456 (implementation subtask)
+- `pnpm build` command output
+- PR #234 (published pull request)
+```
+
+### 4. Assumptions section
+
+Document **unresolved unknowns** and **inferred decisions**.
+
+**Example (from planning-agent):**
+```text
+Assumptions:
+- Existing CSV export utility handles UTF-8 encoding correctly
+- Dataset size will not exceed 10K rows (per requirements constraint)
+- No special column ordering required beyond current table layout
+- PM approval not needed for file naming convention
+```
+
+**Example (from qa-agent):**
+```text
+Assumptions:
+- Browser download behavior is out of scope for test automation
+- Performance baseline of 30s is acceptable per product team
+- Error messages will be finalized during implementation
+```
+
+<Note>
+Explicit assumptions make it easy to identify gaps when reviewing completed work or debugging issues.
+</Note>
+
+### 5. Execution trace comment
+
+Post a parent issue comment named **`Execution-Trace`** with:
+
+**Required fields:**
+- **Actions performed** (in order)
+- **Key decisions** made during execution
+- **Blockers or open questions**
+- **Skill-Version stamp**
+
+**Example (from planning-agent):**
+```text
+Execution-Trace:
+
+Actions:
+1. Read parent issue LIN-123 requirements and acceptance criteria
+2. Inspected src/routes/analytics.ts and src/services/analytics-service.ts
+3. Located existing CSV export utility in src/utils/csv-exporter.ts
+4. Created Technical Plan subtask LIN-456
+5. Created 4 implementation subtasks: LIN-457, LIN-458, LIN-459, LIN-460
+6. Estimated parent issue at 5 story points
+
+Decisions:
+- Split API endpoint and frontend work to enable parallel development
+- Reused existing csv-exporter utility instead of new implementation
+- Kept Technical Plan concise to reduce implementation context load
+
+Blockers: none
+
+Open-Questions: none
+
+Skill-Version: planning-agent@0.0.1
+```
+
+**Example (from implementation-agent):**
+```text
+Execution-Trace:
+
+Actions:
+1. Created branch codex/LIN-123-csv-export
+2. Implemented subtask LIN-457: API endpoint
+3. Implemented subtask LIN-458: Frontend button
+4. Ran pnpm build: passed
+5. Ran pnpm lint: passed
+6. Published PR #234
+7. Moved issue to In review
+
+Decisions:
+- Used streaming response for large datasets to avoid timeouts
+- Added error boundary around export button
+
+Blockers: none
+
+Open-Questions: none
+
+Skill-Version: implementation-agent@0.0.1
+```
+
+## Incomplete runs
+
+If any required section is missing, the agent must:
+
+1. Add a **correction comment** explaining what is missing
+2. Keep the issue in **blocked/open-questions state**
+3. **Do not** mark the stage as done
+4. Wait for manual correction or clarification
+
+**Example correction comment:**
+```text
+Planning incomplete:
+
+- Technical Plan subtask LIN-456 is missing the Assumptions section
+- Implementation subtasks do not include References
+
+Adding tag `open-planning-questions` and keeping issue status as `in-progress`.
+Please review and complete missing sections before proceeding.
+```
+
+## Skill version stamps
+
+Every tracker artifact and comment includes a version stamp:
+
+```text
+Skill-Version: planning-agent@0.0.1
+```
+
+This enables:
+- **Traceability:** Know which agent version created each artifact
+- **Debugging:** Identify behavior changes across versions
+- **Migration:** Understand compatibility when updating skills
+
+## Audit trail benefits
+
+### For teams
+
+- **Transparency:** See exactly what each agent did and why
+- **Trust:** Validate agent decisions with clear reasoning
+- **Continuity:** Resume work easily when agents are blocked
+
+### For debugging
+
+- **Root cause analysis:** Trace decisions back to source inputs
+- **Version tracking:** Identify when behavior changed
+- **Assumption validation:** Check if unknowns became resolved
+
+### For compliance
+
+- **Audit logs:** Complete record of automated actions
+- **Decision history:** Understand scope and risk choices
+- **Change tracking:** Link code changes to requirements
+
+## Example: Complete audit trail
+
+Here's what a complete audit trail looks like for a single ticket:
+
+<Accordion title="Parent issue LIN-123">
+**Title:** Add CSV export for analytics dashboard
+
+**Body:**
+```text
+Context: Users need to analyze dashboard data in Excel
+Goal/Value: Enable data export for offline analysis
+Scope: CSV export button on analytics page
+Constraints: Must handle datasets up to 10K rows
+Reasoning: CSV is universally supported and meets user needs
+References:
+- User request from #product-requests
+- PM confirmation on scope
+Assumptions:
+- No Excel-specific formatting required
+
+Acceptance Criteria:
+1. Export button visible on analytics dashboard
+2. Downloaded CSV includes all visible columns
+3. File naming includes timestamp
+
+Skill-Version: requirements-ticket-agent@0.0.1
+```
+
+**Comment: Execution-Trace (from planning-agent)**
+```text
+Actions:
+1. Read parent issue LIN-123
+2. Inspected src/routes/analytics.ts
+3. Created Technical Plan subtask LIN-456
+4. Created 4 implementation subtasks
+5. Estimated at 5 story points
+
+Decisions:
+- Split API and frontend work
+- Reused existing CSV utility
+
+Blockers: none
+Open-Questions: none
+Skill-Version: planning-agent@0.0.1
+```
+
+**Comment: Execution-Trace (from implementation-agent)**
+```text
+Actions:
+1. Created branch codex/LIN-123-csv-export
+2. Implemented LIN-457, LIN-458
+3. Build and lint passed
+4. Published PR #234
+
+Decisions:
+- Used streaming for large datasets
+
+Blockers: none
+Open-Questions: none
+Skill-Version: implementation-agent@0.0.1
+```
+
+**Comment: Execution-Trace (from pr-review-agent)**
+```text
+Actions:
+1. Reviewed PR #234 diff
+2. Validated acceptance criteria coverage
+3. No blocking issues found
+4. Moved to Done
+
+Decisions:
+- Approved merge
+
+Blockers: none
+Open-Questions: none
+Skill-Version: pr-review-agent@0.0.1
+```
+</Accordion>
+
+<Accordion title="Technical Plan subtask LIN-456">
+**Title:** Technical Plan: CSV export
+
+**Body:**
+```text
+Relevant existing code:
+- src/routes/analytics.ts — dashboard route handler
+- src/services/analytics-service.ts — data query logic
+- src/utils/csv-exporter.ts — existing CSV utility
+
+Changes required:
+- Add export endpoint in analytics.ts
+- Extend analytics-service with export query method
+- Reuse csv-exporter with custom column mapping
+
+Affected modules:
+- API routes (analytics)
+- Analytics service layer
+- Frontend analytics page
+
+Risks:
+- Large datasets may cause timeouts (mitigate with streaming)
+
+Reasoning:
+- Reusing csv-exporter reduces risk and implementation time
+- Splitting API and frontend enables parallel work
+
+References:
+- LIN-123 (parent issue)
+- src/utils/csv-exporter.ts (existing utility)
+
+Assumptions:
+- Existing CSV utility handles UTF-8 encoding
+- No special column ordering required
+
+Skill-Version: planning-agent@0.0.1
+```
+</Accordion>
+
+Every artifact includes complete context, making the entire workflow auditable and traceable.

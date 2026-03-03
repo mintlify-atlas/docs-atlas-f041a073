@@ -1,0 +1,260 @@
+---
+title: 'GitHub integration'
+description: 'Configure Git and GitHub CLI for branch and pull request operations in Open Orchestra workflows'
+keywords: ['github', 'git', 'cli', 'pull request', 'branch', 'pr', 'gh']
+---
+
+## Overview
+
+Open Orchestra requires Git and GitHub CLI (`gh`) for branch management, pull request operations, and code review workflows. The implementation-agent and pr-review-agent use these tools to publish PRs and coordinate review cycles.
+
+## Prerequisites
+
+<Info>
+  Both Git and GitHub CLI must be installed and authenticated before running implementation workflows.
+</Info>
+
+- Git installed and configured
+- GitHub CLI (`gh`) installed and authenticated
+- Repository cloned locally
+- GitHub repository access with permission to push branches and create PRs
+
+## Git requirements
+
+### Installation
+
+Git must be available in your PATH. Verify installation:
+
+```bash
+git --version
+```
+
+### Configuration
+
+Configure Git with your user information:
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+```
+
+<Note>
+  Open Orchestra does not modify your Git configuration. Skills assume Git is already configured correctly.
+</Note>
+
+### Branch operations
+
+The implementation-agent creates feature branches following this naming convention:
+
+```
+codex/<issue-id>-<short-description>
+```
+
+For example:
+- `codex/LIN-123-add-user-auth`
+- `codex/JIRA-456-fix-api-error`
+
+<Tip>
+  The `codex/` prefix helps identify agent-created branches and keeps them organized.
+</Tip>
+
+## GitHub CLI requirements
+
+### Installation
+
+Install GitHub CLI from [cli.github.com](https://cli.github.com) or using a package manager:
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    brew install gh
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```bash
+    # Debian/Ubuntu
+    sudo apt install gh
+
+    # Fedora/RHEL
+    sudo dnf install gh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```bash
+    winget install GitHub.cli
+    ```
+  </Tab>
+</Tabs>
+
+### Authentication
+
+Authenticate GitHub CLI with your GitHub account:
+
+```bash
+gh auth login
+```
+
+Follow the prompts to:
+1. Select GitHub.com or GitHub Enterprise
+2. Choose HTTPS or SSH protocol
+3. Authenticate via browser or token
+
+<Warning>
+  The implementation-agent will stop immediately if `gh` CLI is unavailable. Ensure authentication is complete before running implementation workflows.
+</Warning>
+
+Verify authentication:
+
+```bash
+gh auth status
+```
+
+## Usage in workflows
+
+### Pull request creation
+
+The implementation-agent creates pull requests automatically when implementation is complete:
+
+<Steps>
+  <Step title="Complete implementation">
+    The agent implements all completable subtasks and commits changes to the feature branch.
+  </Step>
+
+  <Step title="Push branch">
+    The agent pushes the branch to the remote repository:
+
+    ```bash
+    git push -u origin codex/<issue-id>-<description>
+    ```
+  </Step>
+
+  <Step title="Create PR">
+    The agent uses `gh pr create` to create the pull request with:
+    - Title derived from the parent issue
+    - Body including summary and tracker issue link
+    - Target branch (usually `main` or `master`)
+  </Step>
+</Steps>
+
+### Pull request updates
+
+When the pr-review-agent requests changes, the implementation-agent enters rework mode:
+
+1. Reads review findings from the handoff comment
+2. Implements required fixes
+3. Commits changes to the existing feature branch
+4. Pushes updates to the remote repository
+5. Updates the PR with a comment summarizing the changes
+
+<Note>
+  The agent updates the existing PR rather than creating a new one. The PR remains open throughout the review cycle.
+</Note>
+
+### PR review workflow
+
+The pr-review-agent reads the PR diff as its primary review input:
+
+```bash
+gh pr diff <pr-number>
+```
+
+It posts review comments using:
+
+```bash
+gh pr comment <pr-number> --body "<review summary>"
+```
+
+## Branch lifecycle
+
+### Standard mode
+
+1. **Branch creation** — implementation-agent creates `codex/<issue-id>-<description>`
+2. **Implementation** — Agent commits changes as it completes subtasks
+3. **Push** — Agent pushes branch to remote when implementation is complete
+4. **PR creation** — Agent creates PR targeting base branch
+5. **Review** — pr-review-agent reviews the PR diff
+6. **Rework** (if needed) — implementation-agent updates the same branch
+7. **Merge** — Human merges PR when review is clean
+
+### Rework mode
+
+In rework mode, the implementation-agent:
+
+- Continues work on the existing feature branch
+- Does not create a new branch
+- Pushes additional commits to address review findings
+- Updates the existing PR
+
+## Troubleshooting
+
+<Warning>
+  Agents will fail immediately if Git operations are not available. Ensure Git and GitHub CLI are properly configured before running workflows.
+</Warning>
+
+### Git issues
+
+**"git not found"**
+- Install Git or ensure it's in your PATH
+- Verify with `git --version`
+
+**Authentication errors**
+- Configure Git credentials for your repository
+- For HTTPS, use a personal access token or credential helper
+- For SSH, ensure your SSH key is added to GitHub
+
+**Push rejected**
+- Check repository permissions
+- Verify the remote URL is correct: `git remote -v`
+- Ensure you have write access to the repository
+
+### GitHub CLI issues
+
+**"gh not found"**
+- Install GitHub CLI from [cli.github.com](https://cli.github.com)
+- Verify with `gh --version`
+
+**Not authenticated**
+- Run `gh auth login` and complete authentication
+- Verify with `gh auth status`
+
+**Permission denied**
+- Check that your authenticated account has repository access
+- Verify you can create PRs manually: `gh pr create`
+- Review repository permissions in GitHub settings
+
+**PR creation fails**
+- Ensure the base branch exists
+- Check that you're not creating a duplicate PR
+- Verify the repository allows PRs from your account
+
+## Best practices
+
+<Tip>
+  Keep your Git and GitHub CLI installations up to date for the best compatibility and security.
+</Tip>
+
+### Repository setup
+
+- Clone repositories using SSH for better authentication handling
+- Configure branch protection rules to require PR reviews
+- Use a consistent base branch name (`main` or `master`)
+
+### Credentials
+
+- Use SSH keys or personal access tokens rather than passwords
+- Enable two-factor authentication on your GitHub account
+- Rotate access tokens periodically
+
+### Workflow integration
+
+- Review PR diffs before merging agent-created PRs
+- Keep feature branches focused on single issues
+- Delete merged branches to keep the repository clean
+
+## Reference
+
+For more information on Git and GitHub CLI:
+
+- [Git documentation](https://git-scm.com/doc)
+- [GitHub CLI manual](https://cli.github.com/manual/)
+- [GitHub authentication docs](https://docs.github.com/en/authentication)

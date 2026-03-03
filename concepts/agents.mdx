@@ -1,0 +1,278 @@
+---
+title: Agents
+description: Understand the agent-based architecture that powers Open Orchestra's software delivery workflow.
+---
+
+Open Orchestra is built on specialized agent skills that work together to execute tickets. Each agent has a clear purpose, defined inputs and outputs, and explicit handoff contracts.
+
+## Core philosophy
+
+**The code is the architecture document.**
+
+Instead of requiring pre-built architecture snapshots that drift out of date, agents navigate the live codebase using search and file-reading tools. This means:
+
+- No architecture initialization ritual before every ticket
+- The coding agent always sees the real, current state of the code
+- Less maintenance overhead; fewer stale context files
+- Implementation subtasks reference actual file paths and patterns
+
+<Note>
+You can still maintain architecture docs and pass them as optional context. They inform but do not replace codebase inspection.
+</Note>
+
+## Available agents
+
+### Requirements ticket agent
+
+**Purpose:** Convert informal user requests into structured tickets.
+
+**When to use:**
+- Starting with an informal request
+- Requirements are incomplete or ambiguous
+- Need to gather clarifying details
+
+**Key behaviors:**
+- Asks focused clarifying questions
+- Produces structured ticket with Context, Goal, Scope, Constraints
+- Creates testable acceptance criteria
+- Tags issue with `requirements-done` when complete
+- Auto-invokes `planning-agent` unless blocked
+
+**Example output structure:**
+```text
+Title: Add CSV export for user analytics dashboard
+
+Body:
+Context: Users need to analyze dashboard data in Excel
+Goal/Value: Enable data export for offline analysis
+Scope: CSV export button on analytics page
+Constraints: Must handle datasets up to 10K rows
+Reasoning: CSV is universally supported and meets user needs
+References:
+- User request from #product-requests
+- PM confirmation on scope
+Assumptions:
+- No Excel-specific formatting required
+
+Acceptance Criteria:
+1. Export button visible on analytics dashboard
+2. Downloaded CSV includes all visible columns
+3. File naming includes timestamp
+```
+
+See [requirements-ticket-agent/SKILL.md](https://github.com/vishal2457/open-orchestra/blob/main/skills/requirements-ticket-agent/SKILL.md) for full details.
+
+### Triage agent
+
+**Purpose:** Classify incoming work and route to the correct next stage.
+
+**When to use:**
+- After a parent issue exists
+- At workflow start for existing issues
+- When scope changes materially
+
+**Key behaviors:**
+- Classifies as `trivial`, `standard`, or `complex`
+- Sets `skip_steps` guidance for downstream agents
+- Routes to `requirements-ticket-agent` or `planning-agent`
+- Uses handoff-first context loading (does not read full history)
+
+**Complexity signals:**
+- **Trivial:** Single-file change, no API/schema changes, clear criteria
+- **Standard:** Bounded multi-file change with known patterns
+- **Complex:** Cross-module changes, API/schema/contract changes, security implications
+
+See [triage-agent/SKILL.md](https://github.com/vishal2457/open-orchestra/blob/main/skills/triage-agent/SKILL.md) for full details.
+
+### Planning agent
+
+**Purpose:** Inspect the live codebase and create implementation subtasks.
+
+**When to use:**
+- After requirements are complete (`requirements-done` tag)
+- Before implementation starts
+
+**Key behaviors:**
+- Reads ticket requirements
+- Uses `grep`, `find`, `ripgrep`, `view_file` to navigate code
+- Creates Technical Plan subtask with real file paths
+- Creates 3–8 implementation subtasks
+- Estimates story points (2, 3, 5, 8, 13)
+- Tags `planning-done` and moves issue to `in-progress`
+- Auto-invokes `implementation-agent` unless blocked
+
+**Example Technical Plan output:**
+```text
+Technical Plan: Add CSV export
+
+Relevant existing code:
+- src/routes/analytics.ts — dashboard route handler
+- src/services/analytics-service.ts — data query logic
+- src/utils/csv-exporter.ts — existing CSV utility
+
+Changes required:
+- Add export endpoint in analytics.ts
+- Extend analytics-service with export query method
+- Reuse csv-exporter utility with custom column mapping
+
+Affected modules:
+- API routes (analytics)
+- Analytics service layer
+- Frontend analytics page
+
+Risks:
+- Large datasets may cause timeouts (mitigate with streaming)
+
+Assumptions:
+- Existing CSV utility handles UTF-8 encoding
+```
+
+See [planning-agent/SKILL.md](https://github.com/vishal2457/open-orchestra/blob/main/skills/planning-agent/SKILL.md) for full details.
+
+### QA agent
+
+**Purpose:** Create ticket-native test cases before implementation.
+
+**When to use:**
+- After planning completes (`planning-done` tag)
+- Runs in parallel with implementation
+
+**Key behaviors:**
+- Reads acceptance criteria and implementation subtasks
+- Creates `qa-plan` subtask with test cases
+- Covers happy path, edge cases, failure modes
+- Tags `qa-done` when complete
+- Does not block implementation (parallel quality gate)
+
+**Example test cases:**
+```text
+QA Plan: CSV export
+
+Positive cases:
+- [ ] Export button visible to logged-in users
+- [ ] Downloaded file has .csv extension
+- [ ] File includes all table columns
+- [ ] Timestamp in filename format: YYYY-MM-DD_HH-MM
+
+Edge cases:
+- [ ] Empty dataset returns valid CSV with headers
+- [ ] Special characters in data are escaped
+- [ ] Large dataset (10K rows) completes within 30s
+
+Failure cases:
+- [ ] Unauthenticated users see 401 error
+- [ ] Network interruption shows user-friendly message
+```
+
+See [qa-agent/SKILL.md](https://github.com/vishal2457/open-orchestra/blob/main/skills/qa-agent/SKILL.md) for full details.
+
+### Implementation agent
+
+**Purpose:** Execute planned subtasks and publish the PR.
+
+**When to use:**
+- After planning completes (`planning-done` tag)
+- After PR review requests rework
+
+**Key behaviors:**
+- Creates `codex/<issue-id>-<description>` branch
+- Implements subtasks in order (or rework-scoped fixes)
+- Marks completed subtasks as done
+- Runs build and lint commands
+- Publishes or updates PR
+- Tags `implementation-done` and `pr-published`
+- Moves issue to `In review`
+- Auto-invokes `pr-review-agent` unless blocked
+
+**Operating modes:**
+- **Standard mode:** Implements all planned subtasks
+- **Rework mode:** Implements only review findings from `pr-review-agent`
+
+See [implementation-agent/SKILL.md](https://github.com/vishal2457/open-orchestra/blob/main/skills/implementation-agent/SKILL.md) for full details.
+
+### PR review agent
+
+**Purpose:** Perform risk-focused PR review and loop back if needed.
+
+**When to use:**
+- After PR is published (`pr-published` tag)
+
+**Key behaviors:**
+- Starts from PR diff (not full codebase)
+- Validates only relevant spec sections
+- Reports blocking issues with severity ranking
+- Loops back to `implementation-agent` if changes required
+- Tags `pr-reviewed` and moves issue to `Done` when clean
+
+**Review focus:**
+- Correctness and regression risk
+- Criteria mismatch
+- Functional bugs
+- Does **not** report style-only nits
+
+**Architecture impact detection:**
+If the PR changes API contracts, data models, service boundaries, auth flows, or runtime behavior, the agent can optionally invoke architecture update workflows.
+
+See [pr-review-agent/SKILL.md](https://github.com/vishal2457/open-orchestra/blob/main/skills/pr-review-agent/SKILL.md) for full details.
+
+## Agent coordination principles
+
+### Automatic chaining
+
+Agents auto-invoke the next agent in the workflow unless blocked:
+
+```
+requirements-ticket-agent
+  ↓ (auto-invoke unless open-requirements-questions)
+triage-agent
+  ↓ (route to planning or requirements)
+planning-agent
+  ↓ (auto-invoke unless open-planning-questions)
+implementation-agent
+  ↓ (auto-invoke unless open-implementation-questions)
+pr-review-agent
+  ↓ (loop back or complete)
+```
+
+### Handoff-first context loading
+
+Agents use a strict context gathering order:
+
+1. Locate the most recent `<!-- OPEN-ORCHESTRA-HANDOFF -->` comment
+2. Parse the JSON handoff summary (primary context)
+3. Check `relevant_artifacts` list and hashes
+4. Declare which artifacts need full reads via `need_full`
+5. Read full content only if hash changed or explicitly required
+6. **Do not** read entire issue history by default
+
+This approach minimizes token usage while maintaining context coherence.
+
+### Token efficiency
+
+- Handoff summaries are capped at 600 tokens
+- Agents use artifact hashes to detect changes
+- Full artifact reads happen only when needed
+- Tracker comments stay concise
+- No raw command logs in issue comments
+
+## Skill versioning and traceability
+
+Every agent stamps its version in tracker artifacts:
+
+```text
+Skill-Version: planning-agent@0.0.1
+```
+
+This enables:
+- Debugging workflow issues
+- Understanding which agent version created artifacts
+- Migrating between workflow versions
+
+## Deprecated agents
+
+<Warning>
+These agents are retained for reference but no longer part of the standard workflow:
+</Warning>
+
+- **init-architect:** Previously initialized architecture artifacts. Replaced by live codebase inspection.
+- **architect-agent:** Previously created technical-details from architecture docs. Replaced by `planning-agent`'s built-in codebase inspection.

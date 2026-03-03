@@ -1,0 +1,211 @@
+---
+title: Requirements ticket agent
+description: Drafts initial ticket requirements by asking targeted clarifying questions and producing a structured ticket with handoff-first context loading.
+---
+
+The requirements ticket agent converts informal user requests into clean, tracker-ready tickets by gathering missing details through clarifying questions.
+
+## Purpose and when to invoke
+
+This agent transforms informal requests into structured tickets before architecture, planning, or implementation work begins.
+
+**Invoke when:**
+- A request is still informal and must become a structured ticket
+- Before architecture, planning, or implementation work starts
+- Requirements are incomplete, ambiguous, or missing constraints
+
+## Required inputs
+
+<ParamField path="user_request" type="string" required>
+  Raw problem statement or initial user request
+</ParamField>
+
+<ParamField path="issue_tracker_mcp" type="string" required>
+  Access to the configured issue tracker MCP
+</ParamField>
+
+<ParamField path="handoff_comment" type="object">
+  Most recent prior handoff comment in `<!-- OPEN-ORCHESTRA-HANDOFF -->` format when present
+</ParamField>
+
+## Runtime configuration
+
+The agent reads `/orchestra-config.json` from the repository root before starting. If missing, it creates the file with:
+
+```json
+{ "issue_tracker": "linear" }
+```
+
+For every tracker write, the agent includes: `Skill-Version: requirements-ticket-agent@0.0.1`
+
+<Warning>
+  If the configured issue tracker MCP is unavailable, the agent stops immediately and does not proceed.
+</Warning>
+
+## Outputs
+
+The agent produces:
+
+- **One created issue** in the configured tracker with structured body including:
+  - Context
+  - Goal/Value
+  - Scope
+  - Constraints
+  - Reasoning
+  - References
+  - Assumptions
+
+- **Parent issue tags:**
+  - `requirements-done` when requirements are complete
+  - `open-requirements-questions` when clarification is still required
+
+- **Handoff comment** with wrapped JSON block for the next stage
+
+### Handoff format
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. <action>\n2. <action>\nDecisions:\n- <decision + reason>\nReferences:\n- <source>\nAssumptions:\n- <assumption>\nOpen-Questions: none|<question list>\nSkill-Version: requirements-ticket-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "requirements-ticket-agent",
+    "to_skill": "planning-agent",
+    "status": "ready|blocked",
+    "delta": ["<what changed in requirements state>"],
+    "key_decisions": [{"decision": "<decision>", "reason": "<reason>"}],
+    "relevant_artifacts": [
+      {
+        "artifact": "parent-issue-requirements",
+        "hash": "sha256:<hash>",
+        "last_modified": "<ISO-8601>",
+        "summary": "<summary of finalized requirements>"
+      }
+    ],
+    "open_blockers": [{"blocker": "<text>", "owner": "<owner>", "next_action": "<action>"}],
+    "next_guidance": {
+      "need_full": ["<artifact names to fully read next>"],
+      "focus": ["<highest-priority requirements clarifications for planning>"]
+    }
+  }
+}
+```
+
+<Note>
+  The `handoff_summary` must be ≤ 600 tokens.
+</Note>
+
+## Procedure
+
+<Steps>
+  <Step title="Read configuration and verify tracker">
+    Read `/orchestra-config.json` and verify the configured tracker MCP is available.
+  </Step>
+
+  <Step title="Execute context gathering">
+    Follow the strict context gathering order:
+    1. Locate the most recent `<!-- OPEN-ORCHESTRA-HANDOFF -->` comment
+    2. Parse the JSON inside it as primary context
+    3. Look at `relevant_artifacts` list and hashes
+    4. Declare exactly which artifacts you need via `need_full`
+    5. Only read full content if hash changed or explicitly required
+  </Step>
+
+  <Step title="Restate and identify gaps">
+    Restate the request in one concise sentence to confirm scope, then identify requirement gaps:
+    - Objective and business/user value
+    - In-scope and out-of-scope boundaries
+    - Actors or user roles
+    - Constraints, dependencies, and assumptions
+    - Success conditions and measurable outcomes
+  </Step>
+
+  <Step title="Ask clarifying questions">
+    Ask focused clarifying questions in small batches. Continue asking follow-up questions until the ticket is actionable.
+  </Step>
+
+  <Step title="Synthesize and draft ticket">
+    Synthesize answers into a single ticket draft using the exact structure:
+
+    ```text
+    Title: <clear outcome-oriented title>
+
+    Body:
+    Context:
+    <context/problem>
+    Goal/Value:
+    <goal/value>
+    Scope:
+    <in-scope and out-of-scope>
+    Constraints:
+    <constraints/dependencies>
+    Reasoning:
+    <why this scope and acceptance criteria satisfy the request>
+    References:
+    - <user request>
+    - <clarifying answer #1>
+    - <clarifying answer #2>
+    Assumptions:
+    - <explicit assumptions and unknowns>
+
+    Acceptance Criteria:
+    1. <testable condition>
+    2. <testable condition>
+    3. <testable condition>
+    ```
+
+    Ensure acceptance criteria are specific, testable, and unambiguous.
+  </Step>
+
+  <Step title="Present draft for confirmation">
+    Present the draft and ask for explicit confirmation or edits.
+  </Step>
+
+  <Step title="Handle ambiguities or finalize">
+    If critical ambiguities remain:
+    - Add tag `open-requirements-questions`
+    - Post handoff JSON with `status: blocked` and explicit `open_blockers`
+    - Stop and wait for human input
+
+    If requirements are complete:
+    - Remove `open-requirements-questions` if present
+    - Add tag `requirements-done`
+    - Post handoff JSON with `status: ready` and no blockers
+  </Step>
+
+  <Step title="Invoke next agent">
+    Invoke `planning-agent` with the created issue ID unless `open-requirements-questions` is present. Return only the created issue link to the user.
+  </Step>
+</Steps>
+
+## Clarifying question set
+
+Ask only what is needed. Prefer short, high-signal questions:
+
+1. What problem are we solving, and who is affected?
+2. What outcome defines success?
+3. What must be included in scope?
+4. What is explicitly out of scope?
+5. Are there constraints (time, compliance, platform, integrations)?
+6. Are there dependencies or blockers?
+7. Are there edge cases or failure states that must be handled?
+8. How should we validate completion?
+
+## Guardrails
+
+<Warning>
+  The agent must follow these constraints:
+</Warning>
+
+- Do not analyze repository code, architecture, or implementation design
+- Do not propose technical solutions unless the user explicitly asks
+- Do not invent requirements; mark unknowns and ask
+- Do not finalize the ticket until critical ambiguities are resolved
+- Do not accept title-only or placeholder issue bodies
+- Do not echo the full finalized ticket after issue creation
+- Return only the issue URL after creating the ticket
+- Keep language concrete and non-technical unless the user uses technical terms
+- Do not invoke the next skill while `open-requirements-questions` is present
+- Do not reconstruct state from full comment history; use handoff summary first and lazy-load only required artifacts
+
+## Handoff
+
+Primary consumer: `planning-agent` (auto-invoke when unblocked).

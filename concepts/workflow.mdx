@@ -1,0 +1,170 @@
+---
+title: Workflow
+description: Learn how Open Orchestra executes tickets from requirements to PR review in a coordinated agent chain.
+---
+
+Open Orchestra runs a ticket-driven software delivery workflow that mirrors how real development teams work in agile environments — ticket by ticket, grounded in the actual codebase.
+
+## Agent execution chain
+
+The workflow follows a linear progression with automatic handoffs between agents:
+
+```
+requirements-ticket-agent  →  triage-agent  →  planning-agent  →  implementation-agent  →  pr-review-agent
+                                                      ↓ (parallel)
+                                                  qa-agent
+```
+
+<Note>
+Each agent automatically invokes the next agent in the chain unless blocked by open questions.
+</Note>
+
+## Stage-by-stage walkthrough
+
+<Steps>
+  <Step title="Requirements (optional)">
+    If you have an informal request without structured requirements, run `requirements-ticket-agent` first. This agent:
+    - Asks targeted clarifying questions
+    - Converts raw requests into structured tickets
+    - Adds `requirements-done` tag when complete
+    - Auto-invokes `triage-agent` when unblocked
+
+    **Skip this stage** if your parent issue already has complete requirements.
+  </Step>
+
+  <Step title="Triage">
+    `triage-agent` classifies the work and routes to the correct next stage:
+    - Classifies as `trivial`, `standard`, or `complex`
+    - Routes to `requirements-ticket-agent` if requirements are missing
+    - Routes to `planning-agent` if requirements are complete
+    - Sets `skip_steps` guidance for downstream agents
+  </Step>
+
+  <Step title="Planning">
+    `planning-agent` inspects the live codebase and creates implementation subtasks:
+    - Reads ticket requirements
+    - Uses search and file-reading tools to navigate the actual code
+    - Creates a Technical Plan subtask
+    - Creates 3–8 implementation subtasks with real file paths
+    - Estimates story points (2, 3, 5, 8, or 13)
+    - Adds `planning-done` tag and moves issue to `in-progress`
+    - Auto-invokes `implementation-agent` when unblocked
+
+    <Note>
+    No architecture docs required. The code is the architecture document. If you maintain architecture docs, you can pass them as optional context.
+    </Note>
+  </Step>
+
+  <Step title="QA planning (parallel)">
+    `qa-agent` runs after planning completes and works in parallel:
+    - Reads acceptance criteria and implementation subtasks
+    - Creates a `qa-plan` subtask with test cases
+    - Adds `qa-done` tag when complete
+    - Does not block implementation
+  </Step>
+
+  <Step title="Implementation">
+    `implementation-agent` executes the planned subtasks:
+    - Creates a `codex/<issue-id>-<description>` branch
+    - Implements subtasks in order
+    - Runs build and lint commands
+    - Marks completed subtasks as done
+    - Publishes PR and moves issue to `In review`
+    - Adds `implementation-done` and `pr-published` tags
+    - Auto-invokes `pr-review-agent` when unblocked
+  </Step>
+
+  <Step title="PR review">
+    `pr-review-agent` performs a risk-focused review:
+    - Starts from the PR diff (not full codebase)
+    - Validates only relevant spec sections
+    - Posts findings on PR and issue tracker
+    - Loops back to `implementation-agent` if changes are required
+    - Adds `pr-reviewed` tag and moves issue to `Done` when clean
+  </Step>
+</Steps>
+
+## How to start a workflow
+
+1. Create or identify a parent issue in your tracker (Linear or Jira)
+2. Run the first needed agent based on your starting point:
+
+<Accordion title="Starting with an informal request">
+```bash
+Use $requirements-ticket-agent for "Add user export feature"
+```
+The agent will ask clarifying questions, create a structured ticket, and automatically chain to triage.
+</Accordion>
+
+<Accordion title="Starting with an existing ticket">
+```bash
+Use $triage-agent for LIN-123
+```
+The agent will classify the work and route to planning or requirements as needed.
+</Accordion>
+
+<Accordion title="Starting with complete requirements">
+```bash
+Use $planning-agent for LIN-123
+```
+The agent will inspect the codebase, create a plan, and chain to implementation.
+</Accordion>
+
+## Workflow tags
+
+Agents use tags to track completion and coordinate handoffs:
+
+### Stage completion tags
+
+- `requirements-done` — Requirements are complete and actionable
+- `planning-done` — Technical plan and implementation subtasks created
+- `qa-done` — QA test cases created (parallel gate)
+- `implementation-done` — All subtasks implemented
+- `pr-published` — Pull request created or updated
+- `pr-reviewed` — Review is clean and PR is ready to merge
+
+### Open question tags
+
+These tags block progression until resolved:
+
+- `open-requirements-questions` — Requirements need clarification
+- `open-planning-questions` — Planning is blocked
+- `open-qa-questions` — QA planning is blocked
+- `open-implementation-questions` — Implementation is blocked
+- `open-pr-review-questions` — Review is blocked
+
+<Warning>
+Agents will not auto-invoke the next stage while an `open-*-questions` tag is present.
+</Warning>
+
+## Optional architecture docs
+
+By default, agents read the live codebase directly. You can optionally pass architecture docs as extra context:
+
+```bash
+Use $planning-agent for LIN-123 with context: architecture/architecture.md
+```
+
+The planning agent will read the provided file alongside the live code. This is useful for:
+- High-level system boundaries
+- Security constraints
+- Cross-service contracts
+- Migration strategies
+
+## Zero-config setup
+
+The first time you run any entry-point agent, it automatically creates `/orchestra-config.json` in your repository root:
+
+```json
+{
+  "issue_tracker": "linear"
+}
+```
+
+To use Jira instead, edit the file:
+
+```json
+{
+  "issue_tracker": "jira"
+}
+```

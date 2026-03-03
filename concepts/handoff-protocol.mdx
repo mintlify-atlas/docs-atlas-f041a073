@@ -1,0 +1,447 @@
+---
+title: Handoff protocol
+description: Understand the JSON handoff protocol that enables deterministic agent chaining and efficient context loading.
+---
+
+Open Orchestra uses a structured JSON handoff protocol to coordinate agent execution. This protocol ensures agents can chain deterministically, load context efficiently, and maintain full traceability.
+
+## Why a handoff protocol
+
+Without structured handoffs, agents must:
+- Read entire issue histories to understand context (high token cost)
+- Reconstruct state from unstructured comments
+- Miss critical decisions or blockers
+- Duplicate work or load unnecessary artifacts
+
+The handoff protocol solves this by providing:
+- **Compact summaries** (≤600 tokens) of previous work
+- **Artifact hashes** to detect changes
+- **Explicit routing** to the next agent
+- **Machine-parseable JSON** for deterministic chaining
+
+## Handoff comment format
+
+Every agent posts a handoff comment in this exact format:
+
+```markdown
+## Handing Off for <Stage Name>
+
+<!-- OPEN-ORCHESTRA-HANDOFF -->
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. <action>\n2. <action>\nDecisions:\n- <decision + reason>\nReferences:\n- <source>\nAssumptions:\n- <assumption>\nOpen-Questions: none|<question list>\nSkill-Version: <skill>@<version>",
+  "handoff_summary": {
+    "from_skill": "<current-agent>",
+    "to_skill": "<next-agent>|none",
+    "status": "ready|blocked|completed",
+    "delta": ["<what changed since prior handoff>"],
+    "key_decisions": [{"decision": "<decision>", "reason": "<why>"}],
+    "relevant_artifacts": [
+      {
+        "artifact": "<name>",
+        "hash": "sha256:<hash>",
+        "last_modified": "<ISO-8601>",
+        "summary": "<why this artifact matters>"
+      }
+    ],
+    "open_blockers": [{"blocker": "<text>", "owner": "<owner>", "next_action": "<action>"}],
+    "next_guidance": {
+      "need_full": ["<artifact names to fully read next>"],
+      "focus": ["<priority items for next skill>"]
+    }
+  }
+}
+```
+```
+
+<Note>
+The `<!-- OPEN-ORCHESTRA-HANDOFF -->` marker makes handoff comments easy to locate programmatically.
+</Note>
+
+## Handoff JSON fields
+
+### execution_trace (string)
+
+A compact string representation of the agent's execution trace, including:
+- Actions performed (in order)
+- Key decisions and reasoning
+- References to source artifacts
+- Assumptions made
+- Open questions (if any)
+- Skill version stamp
+
+**Example:**
+```json
+"execution_trace": "Execution-Trace:\nActions:\n1. Read parent issue LIN-123\n2. Inspected src/routes/analytics.ts\n3. Created Technical Plan LIN-456\n4. Created 4 implementation subtasks\nDecisions:\n- Split API and UI work for parallel development\n- Reused existing CSV utility\nReferences:\n- LIN-123\n- src/utils/csv-exporter.ts\nAssumptions:\n- CSV utility handles UTF-8\nOpen-Questions: none\nSkill-Version: planning-agent@0.0.1"
+```
+
+### handoff_summary (object)
+
+The primary context for the next agent.
+
+#### from_skill (string)
+
+The agent that created this handoff.
+
+**Examples:**
+- `"requirements-ticket-agent"`
+- `"planning-agent"`
+- `"implementation-agent"`
+- `"pr-review-agent"`
+
+#### to_skill (string)
+
+The next agent in the workflow, or `"none"` if the workflow is complete.
+
+**Examples:**
+- `"planning-agent"`
+- `"implementation-agent"`
+- `"pr-review-agent"`
+- `"none"` (workflow complete)
+
+#### status (string)
+
+The handoff status. Must be one of:
+- `"ready"` — Next agent can proceed
+- `"blocked"` — Open questions prevent progression
+- `"completed"` — Workflow stage is done (used by `pr-review-agent`)
+
+<Warning>
+If `status` is `"blocked"`, the `open_blockers` array must contain at least one entry.
+</Warning>
+
+#### delta (array of strings)
+
+What changed in this agent's execution compared to the previous handoff.
+
+**Example:**
+```json
+"delta": [
+  "Created 4 implementation subtasks",
+  "Estimated parent issue at 5 story points",
+  "Added human-review-required tag"
+]
+```
+
+#### key_decisions (array of objects)
+
+Important decisions made during execution with reasoning.
+
+**Example:**
+```json
+"key_decisions": [
+  {
+    "decision": "Split API and UI work into separate subtasks",
+    "reason": "Can be implemented independently and in parallel"
+  },
+  {
+    "decision": "Deferred non-blocking cleanup",
+    "reason": "Reduced story points from 8 to 5 by focusing on core requirements"
+  }
+]
+```
+
+#### relevant_artifacts (array of objects)
+
+Artifacts that the next agent may need, with metadata to enable lazy loading.
+
+**Fields:**
+- `artifact` (string) — Artifact name or identifier
+- `hash` (string) — SHA-256 hash of content (format: `"sha256:<hash>"`)
+- `last_modified` (string) — ISO-8601 timestamp
+- `summary` (string) — Why this artifact matters
+
+**Example:**
+```json
+"relevant_artifacts": [
+  {
+    "artifact": "implementation-subtasks",
+    "hash": "sha256:a1b2c3d4...",
+    "last_modified": "2026-02-22T10:30:00Z",
+    "summary": "4 subtasks covering API endpoint, frontend button, error handling, and tests"
+  },
+  {
+    "artifact": "technical-plan-LIN-456",
+    "hash": "sha256:e5f6g7h8...",
+    "last_modified": "2026-02-22T10:25:00Z",
+    "summary": "Technical plan with file paths and existing pattern references"
+  }
+]
+```
+
+The next agent uses hashes to determine if it needs to re-read artifacts.
+
+#### open_blockers (array of objects)
+
+Blockers preventing the next agent from proceeding. Must be populated when `status` is `"blocked"`.
+
+**Fields:**
+- `blocker` (string) — Description of the blocker
+- `owner` (string) — Who can resolve it (e.g., `"human"`, `"pm"`, `"tech-lead"`)
+- `next_action` (string) — What needs to happen
+
+**Example:**
+```json
+"open_blockers": [
+  {
+    "blocker": "Acceptance criteria do not specify error message format",
+    "owner": "pm",
+    "next_action": "Clarify expected error messages for export failures"
+  }
+]
+```
+
+#### next_guidance (object)
+
+Guidance for the next agent on what to focus on.
+
+**Fields:**
+- `need_full` (array of strings) — Artifacts that must be fully read
+- `focus` (array of strings) — Priority items or areas
+- `findings` (array of objects, optional) — Specific issues to address (used by `pr-review-agent`)
+
+**Example (from planning-agent):**
+```json
+"next_guidance": {
+  "need_full": ["implementation-subtasks"],
+  "focus": [
+    "Implement API endpoint before frontend to enable parallel testing",
+    "Validate streaming behavior with large datasets"
+  ]
+}
+```
+
+**Example (from pr-review-agent with findings):**
+```json
+"next_guidance": {
+  "need_full": ["LIN-457"],
+  "focus": ["Fix error handling in export endpoint"],
+  "findings": [
+    {
+      "id": "finding-1",
+      "severity": "high",
+      "file": "src/routes/analytics.ts",
+      "problem": "Missing error handling for database query failures",
+      "required_change": "Add try-catch and return 500 with user-friendly message",
+      "affected_subtasks": ["LIN-457"]
+    }
+  ]
+}
+```
+
+## Strict context gathering order
+
+All agents follow this order when loading context:
+
+<Steps>
+  <Step title="Locate handoff comment">
+    Find the most recent comment containing `<!-- OPEN-ORCHESTRA-HANDOFF -->` from the previous agent.
+  </Step>
+
+  <Step title="Parse JSON">
+    Parse the JSON inside the handoff comment. Treat `handoff_summary` as the primary context.
+  </Step>
+
+  <Step title="Review artifact metadata">
+    Look at the `relevant_artifacts` list and hashes. Do not read full artifacts yet.
+  </Step>
+
+  <Step title="Declare needed artifacts">
+    Determine which artifacts require full reads based on the current task. Populate `need_full` in your own handoff.
+  </Step>
+
+  <Step title="Lazy load artifacts">
+    Read full artifact content only if:
+    - Hash changed since last read
+    - Explicitly declared in `need_full`
+    - Task cannot proceed without it
+  </Step>
+
+  <Step title="Do not read full history">
+    Do not read the entire issue comment history or all prior execution traces by default.
+  </Step>
+</Steps>
+
+<Note>
+This order minimizes token usage by avoiding unnecessary full reads.
+</Note>
+
+## Token budget
+
+**Maximum handoff summary size: 600 tokens**
+
+This limit ensures:
+- Summaries stay focused on essential information
+- Next agents can load context efficiently
+- Total workflow token cost remains manageable
+
+**If you exceed 600 tokens:**
+- Remove redundant details
+- Summarize long lists (e.g., "4 subtasks covering..." instead of listing all titles)
+- Move verbose content to linked artifacts
+- Use artifact hashes to defer full reads
+
+## Real-world examples
+
+### Example 1: Planning to implementation (ready)
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. Read parent issue LIN-123\n2. Inspected src/routes/analytics.ts and src/services/analytics-service.ts\n3. Created Technical Plan subtask LIN-456\n4. Created 4 implementation subtasks: LIN-457, LIN-458, LIN-459, LIN-460\n5. Estimated parent issue at 5 story points\nDecisions:\n- Split API endpoint and frontend work to enable parallel development\n- Reused existing csv-exporter utility instead of new implementation\nReferences:\n- LIN-123\n- src/routes/analytics.ts\n- src/utils/csv-exporter.ts\nAssumptions:\n- CSV utility handles UTF-8 encoding correctly\nOpen-Questions: none\nSkill-Version: planning-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "planning-agent",
+    "to_skill": "implementation-agent",
+    "status": "ready",
+    "delta": [
+      "Created Technical Plan LIN-456",
+      "Created 4 implementation subtasks",
+      "Estimated at 5 story points"
+    ],
+    "key_decisions": [
+      {
+        "decision": "Split API and UI work",
+        "reason": "Enable parallel development and independent testing"
+      }
+    ],
+    "relevant_artifacts": [
+      {
+        "artifact": "implementation-subtasks",
+        "hash": "sha256:a1b2c3d4e5f6g7h8i9j0",
+        "last_modified": "2026-02-22T10:30:00Z",
+        "summary": "4 subtasks: API endpoint, frontend button, error handling, tests"
+      }
+    ],
+    "open_blockers": [],
+    "next_guidance": {
+      "need_full": ["implementation-subtasks"],
+      "focus": ["Implement API endpoint first to unblock frontend work"]
+    }
+  }
+}
+```
+
+### Example 2: PR review to implementation (rework)
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. Reviewed PR #234 diff\n2. Validated acceptance criteria coverage\n3. Found 2 high-severity issues\n4. Posted review findings\nDecisions:\n- Requesting changes before merge\n- Routing back to implementation-agent\nReferences:\n- PR #234\n- LIN-123 acceptance criteria\nAssumptions:\n- Error handling patterns exist in codebase\nOpen-Questions: none\nSkill-Version: pr-review-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "pr-review-agent",
+    "to_skill": "implementation-agent",
+    "status": "ready",
+    "delta": [
+      "Reviewed PR #234",
+      "Found 2 high-severity findings",
+      "Moved issue back to In Progress"
+    ],
+    "key_decisions": [
+      {
+        "decision": "Request changes",
+        "reason": "Missing error handling could cause uncaught exceptions"
+      }
+    ],
+    "relevant_artifacts": [
+      {
+        "artifact": "pr-234-diff",
+        "hash": "sha256:1a2b3c4d5e6f",
+        "last_modified": "2026-02-22T14:15:00Z",
+        "summary": "Changes to analytics.ts and export-service.ts"
+      }
+    ],
+    "open_blockers": [],
+    "next_guidance": {
+      "need_full": ["LIN-457"],
+      "focus": ["Fix error handling in export endpoint"],
+      "findings": [
+        {
+          "id": "finding-1",
+          "severity": "high",
+          "file": "src/routes/analytics.ts",
+          "problem": "Missing try-catch for database query failures",
+          "required_change": "Add try-catch and return 500 with user-friendly message",
+          "affected_subtasks": ["LIN-457"]
+        },
+        {
+          "id": "finding-2",
+          "severity": "high",
+          "file": "src/services/export-service.ts",
+          "problem": "No timeout handling for large queries",
+          "required_change": "Add query timeout of 30s and graceful degradation",
+          "affected_subtasks": ["LIN-457"]
+        }
+      ]
+    }
+  }
+}
+```
+
+### Example 3: Planning blocked
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. Read parent issue LIN-123\n2. Inspected src/routes/analytics.ts\n3. Found ambiguity in acceptance criteria\nDecisions:\n- Blocking planning until clarification\nReferences:\n- LIN-123 acceptance criteria #2\nAssumptions: none\nOpen-Questions:\n- Does 'all visible columns' include computed columns?\n- Should column order match UI or be alphabetical?\nSkill-Version: planning-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "planning-agent",
+    "to_skill": "planning-agent",
+    "status": "blocked",
+    "delta": [
+      "Started codebase inspection",
+      "Added open-planning-questions tag"
+    ],
+    "key_decisions": [],
+    "relevant_artifacts": [
+      {
+        "artifact": "parent-issue-LIN-123",
+        "hash": "sha256:9z8y7x6w5v",
+        "last_modified": "2026-02-22T09:00:00Z",
+        "summary": "Acceptance criteria need clarification on column handling"
+      }
+    ],
+    "open_blockers": [
+      {
+        "blocker": "Acceptance criteria #2 is ambiguous about which columns to export",
+        "owner": "pm",
+        "next_action": "Clarify if computed columns should be included and specify column ordering"
+      }
+    ],
+    "next_guidance": {
+      "need_full": [],
+      "focus": ["Resolve column inclusion and ordering questions"]
+    }
+  }
+}
+```
+
+## JSON validation rules
+
+<Warning>
+Handoff JSON must follow these rules or downstream agents will fail to parse:
+</Warning>
+
+- Use **valid JSON** (no comments, no trailing commas)
+- Keep **key names stable** (downstream agents parse by key name)
+- `status` must be `"ready"`, `"blocked"`, or `"completed"`
+- If `status` is `"blocked"`, include at least one `open_blockers` entry
+- `handoff_summary` must be **≤600 tokens**
+- All timestamps must be **ISO-8601 format**
+- Artifact hashes must start with `"sha256:"`
+
+## Benefits of the handoff protocol
+
+### Efficiency
+
+- Agents load only what they need (lazy artifact reads)
+- Handoff summaries cap token usage at 600 tokens
+- No need to read entire issue histories
+
+### Reliability
+
+- Machine-parseable JSON enables deterministic chaining
+- Artifact hashes detect content changes
+- Explicit status and blockers prevent ambiguous states
+
+### Traceability
+
+- Every handoff includes execution trace and skill version
+- Key decisions are documented with reasoning
+- Full audit trail from requirements to PR review

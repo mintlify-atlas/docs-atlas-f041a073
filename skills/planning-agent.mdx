@@ -1,0 +1,217 @@
+---
+title: Planning agent
+description: Reads ticket requirements, inspects the live codebase, creates a Technical Plan subtask, and creates implementation subtasks without requiring architecture docs.
+---
+
+The planning agent turns a ticket into a concrete, code-grounded Technical Plan subtask and a set of implementation subtasks by reading the ticket, navigating actual source files, and breaking work into subtasks — all in one pass.
+
+## Purpose and when to invoke
+
+This agent transforms requirements into actionable technical plans and implementation subtasks by directly inspecting the codebase.
+
+**Invoke when:**
+- After requirements are confirmed on the parent issue (`requirements-done`)
+- Before Implementation Agent starts code changes
+
+## Optional user-provided context
+
+The user may supply additional files to aid planning. These files take priority during the Technical Plan step:
+- An existing `architecture.md` or any architecture document
+- Component design notes, ADRs, or any reference file the user considers relevant
+
+<Note>
+  Read user-provided files first when available. They do not replace codebase inspection; both are used together.
+</Note>
+
+## Required inputs
+
+<ParamField path="parent_issue_id" type="string" required>
+  Parent issue ID (source of truth ticket)
+</ParamField>
+
+<ParamField path="requirements_done_tag" type="boolean" required>
+  Parent issue has tag `requirements-done`
+</ParamField>
+
+<ParamField path="handoff_comment" type="object" required>
+  Most recent prior handoff comment in `<!-- OPEN-ORCHESTRA-HANDOFF -->` format
+</ParamField>
+
+## Runtime configuration
+
+The agent reads `/orchestra-config.json` from the repository root before starting. If missing, it creates the file with:
+
+```json
+{ "issue_tracker": "linear" }
+```
+
+For every tracker operation, the agent includes: `Skill-Version: planning-agent@0.0.1`
+
+<Warning>
+  If the configured issue tracker MCP is unavailable, the agent stops immediately and does not proceed.
+</Warning>
+
+## Outputs
+
+The agent produces:
+
+- **One Technical Plan subtask** under the parent issue, covering:
+  - What exists in the codebase that is relevant
+  - What needs to change and why
+  - Affected files/modules
+  - Risks and assumptions
+
+- **Technical Plan subtask lifecycle:**
+  - Mark done when there are no open planning questions and no `human-review-required` tag on the parent issue
+  - Keep open when planning has unresolved questions or parent issue requires human review
+
+- **Up to 8 implementation subtasks** under the parent issue, each containing:
+  - Objective and scope
+  - Files/modules to touch
+  - Implementation notes from actual code inspection
+  - Reasoning for decomposition choice
+  - References to source artifacts
+  - Assumptions/unknowns
+
+- **Story-point tag** applied to parent issue only:
+  - `story-point-2`, `story-point-3`, `story-point-5`, `story-point-8`, or `story-point-13`
+
+- **Parent issue tags:**
+  - `human-review-required` when story points are 8 or 13
+  - `planning-done` after planning is completed
+  - `open-planning-questions` when planning is blocked
+
+- **Parent issue status** set to `in-progress` after planning is completed
+
+- **Handoff comment** with wrapped JSON block
+
+### Handoff format
+
+```json
+{
+  "execution_trace": "Execution-Trace:\nActions:\n1. <action>\n2. <action>\nDecisions:\n- <decomposition or sizing decision + reason>\nReferences:\n- <files inspected or user-provided docs>\nAssumptions:\n- <assumption>\nOpen-Questions: none|<question list>\nSkill-Version: planning-agent@0.0.1",
+  "handoff_summary": {
+    "from_skill": "planning-agent",
+    "to_skill": "implementation-agent",
+    "status": "ready|blocked",
+    "delta": ["<what changed in planning output>"],
+    "key_decisions": [{"decision": "<decision>", "reason": "<reason>"}],
+    "relevant_artifacts": [
+      {
+        "artifact": "implementation-subtasks",
+        "hash": "sha256:<hash>",
+        "last_modified": "<ISO-8601>",
+        "summary": "<plan shape, sizing, and scope coverage>"
+      }
+    ],
+    "open_blockers": [{"blocker": "<text>", "owner": "<owner>", "next_action": "<action>"}],
+    "next_guidance": {
+      "need_full": ["implementation-subtasks"],
+      "focus": ["<priority implementation sequencing hints>"]
+    }
+  }
+}
+```
+
+<Note>
+  The `handoff_summary` must be ≤ 600 tokens.
+</Note>
+
+## Procedure
+
+<Steps>
+  <Step title="Read configuration and validate">
+    Read `/orchestra-config.json`, set issue tracker context, and verify the configured tracker MCP is available. Validate that parent issue has tag `requirements-done`. If any prerequisite is missing, add a blocking comment and stop.
+  </Step>
+
+  <Step title="Execute context gathering">
+    Follow the strict context gathering order:
+    1. Locate the most recent `<!-- OPEN-ORCHESTRA-HANDOFF -->` comment
+    2. Parse the JSON inside it as primary context
+    3. Look at `relevant_artifacts` list and hashes
+    4. Declare exactly which artifacts you need via `need_full`
+    5. Only read full content if hash changed or explicitly required
+  </Step>
+
+  <Step title="Read requirements and optional context">
+    Read the parent issue: title, description, and acceptance criteria. If the user has provided optional context files (architecture docs, design notes), read them now.
+  </Step>
+
+  <Step title="Inspect codebase">
+    Use available search and file-reading tools to understand existing code:
+    - Locate relevant entry points, routes, handlers, models, and modules
+    - Identify existing patterns the implementation should follow
+    - Note files that will need to be created, modified, or extended
+    - Read only what is necessary for the ticket scope
+  </Step>
+
+  <Step title="Produce Technical Plan">
+    Produce a short and precise Technical Plan:
+    - Summary of what the ticket requires
+    - Relevant existing code (files, patterns, key functions identified)
+    - What needs to change and where
+    - Affected modules and blast radius
+    - Risks, open questions, and assumptions
+
+    Create a Technical Plan subtask under the parent issue with this content.
+  </Step>
+
+  <Step title="Break work into subtasks">
+    Break work into implementation-focused subtasks (target 3–6, hard cap 8). Each subtask must be directly derivable from the live code and ticket scope. Create each subtask with objective, scope, implementation notes, decomposition reasoning, references, and assumptions.
+  </Step>
+
+  <Step title="Estimate and tag">
+    Estimate the whole parent issue using Fibonacci points (2, 3, 5, 8, 13) and apply the corresponding `story-point-*` tag. Add `human-review-required` if the score is 8 or 13.
+
+    **Story pointing rules:**
+    - `2`: Very small scope, low risk, minimal unknowns
+    - `3`: Small scope, moderate complexity, limited unknowns
+    - `5`: Medium scope or cross-module work, notable uncertainty
+    - `8`: Large scope with multiple dependencies and higher risk
+    - `13`: Very large/high uncertainty; strong recommendation to split before implementation
+  </Step>
+
+  <Step title="Complete Technical Plan subtask">
+    If there are no unresolved planning questions and parent issue does not have `human-review-required`, mark the Technical Plan subtask done. Otherwise leave it open with a brief note explaining what is pending.
+  </Step>
+
+  <Step title="Handle blockers or finalize">
+    If planning is blocked by unresolved questions:
+    - Add `open-planning-questions`
+    - Post handoff JSON with `status: blocked` and explicit `open_blockers`
+    - Stop and wait for clarifications
+
+    If planning is complete:
+    - Remove `open-planning-questions` if present
+    - Add tag `planning-done` and set parent issue status to `in-progress`
+    - Post handoff JSON with `status: ready` and no blockers
+  </Step>
+
+  <Step title="Invoke next agent">
+    Invoke `implementation-agent` with the same parent issue ID unless `open-planning-questions` is present.
+  </Step>
+</Steps>
+
+## Guardrails
+
+<Warning>
+  The agent must follow these constraints:
+</Warning>
+
+- Do not edit code
+- Do not create commits or implementation changes
+- Do not apply story-point tags to subtasks
+- Do not create more than 8 subtasks for a single parent issue
+- Do not create title-only subtasks; every subtask must include required body sections
+- Do not include validation expectations, done criteria, or dependency ordering in subtasks
+- Do not assign testing, QA execution, or code review tasks to the implementation subtasks
+- Ensure subtasks cumulatively cover 100% of the parent issue scope
+- If issue score is 13, explicitly recommend splitting scope before implementation begins
+- Do not run tracker operations unless the MCP for the configured issue tracker is available
+- Keep tracker comments concise; avoid repeating full subtask lists already visible in the tracker
+- Do not reconstruct state from full comment history; use handoff summary first and lazy-load only required artifacts
+- The Technical Plan subtask must stay short and precise — its purpose is to orient the implementation agent, not to be an exhaustive document
+
+## Handoff
+
+Primary consumer: `implementation-agent` (auto-invoke when unblocked).

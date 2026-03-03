@@ -1,80 +1,338 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Install Open Orchestra and run your first skill in under 5 minutes
 ---
 
-## Get started in three steps
+## Install the skill pack
 
-Get your documentation site running locally and make your first customization.
+Open Orchestra skills can be installed directly from the GitHub repository:
 
-### Step 1: Set up your local environment
+```bash
+npx skills add https://github.com/vishal2457/open-orchestra/tree/main/skills
+```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+This command installs all six workflow skills into your agent runtime:
+- `requirements-ticket-agent`
+- `triage-agent`
+- `planning-agent`
+- `qa-agent`
+- `implementation-agent`
+- `pr-review-agent`
+
+<Note>
+  The workflow is **zero-config**. When you run any entry-point skill for the first time, it will automatically create a default `/orchestra-config.json` file in your repository root.
+</Note>
+
+## Prerequisites
+
+Before running Open Orchestra skills, ensure you have:
+
+<Steps>
+  <Step title="Issue tracker MCP">
+    Open Orchestra requires an issue tracker MCP (Model Context Protocol) server. By default, it uses **Linear**. To use **Jira**, edit the `issue_tracker` value in `orchestra-config.json` after first run.
+  </Step>
+  
+  <Step title="GitHub CLI (gh)">
+    Implementation and PR review skills require the `gh` CLI for PR operations:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    ```bash
+    # Install gh CLI
+    brew install gh  # macOS
+    # or visit https://cli.github.com for other platforms
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    # Authenticate
+    gh auth login
+    ```
+  </Step>
+  
+  <Step title="Git configuration">
+    Ensure git is configured with your user name and email:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    git config --global user.name "Your Name"
+    git config --global user.email "your.email@example.com"
+    ```
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Run your first skill
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+Let's walk through a complete workflow from requirements to implementation.
 
-### Step 3: Go live
+### Step 1: Create requirements
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+Start with an informal feature request and use `requirements-ticket-agent` to structure it:
 
-## Next steps
+<CodeGroup>
+```bash Command
+# In your agent runtime (Codex, etc.)
+Use $requirements-ticket-agent for "Add a dark mode toggle to the settings page"
+```
 
-Now that you have your docs running, explore these key features:
+```text Expected output
+Created issue: LIN-123
+https://linear.app/your-team/issue/LIN-123
+```
+</CodeGroup>
 
-<CardGroup cols={2}>
+The agent will:
+1. Ask clarifying questions about the feature
+2. Draft a structured ticket with Context, Goal, Scope, Constraints, and Acceptance Criteria
+3. Ask for your confirmation
+4. Create the ticket in Linear with tag `requirements-done`
+5. Auto-invoke `planning-agent`
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+<Tip>
+  If you already have a well-structured issue in Linear, you can skip `requirements-ticket-agent` and start with `triage-agent` or `planning-agent` directly.
+</Tip>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+### Step 2: Automatic planning
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+Since `requirements-ticket-agent` auto-invokes the next skill, `planning-agent` runs automatically. You'll see:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+<Steps>
+  <Step title="Codebase inspection">
+    The agent uses `grep`, `ripgrep`, and `view_file` to navigate your actual source code and identify:
+    - Relevant entry points, routes, and components
+    - Existing patterns for settings and themes
+    - Files that need modification
+  </Step>
+  
+  <Step title="Technical plan creation">
+    A Technical Plan subtask is created under LIN-123 with:
+    - Summary of what exists in the codebase
+    - What needs to change and why
+    - Affected files/modules
+    - Risks and assumptions
+  </Step>
+  
+  <Step title="Implementation subtasks">
+    Up to 8 implementation subtasks are created, each with:
+    - Objective and scope
+    - Files/modules to touch
+    - Implementation notes derived from code inspection
+    - References to inspected source files
+  </Step>
+  
+  <Step title="Story point estimation">
+    A story-point tag (`story-point-2`, `story-point-3`, `story-point-5`, `story-point-8`, or `story-point-13`) is applied to the parent issue.
+  </Step>
+</Steps>
 
+<Warning>
+  If the estimated story points are **8 or 13**, the parent issue receives a `human-review-required` tag. Review the scope before proceeding to implementation.
+</Warning>
+
+### Step 3: QA planning (parallel)
+
+While planning completes, `qa-agent` runs in parallel to create ticket-native test cases:
+
+```text QA Plan subtask example
+QA Plan: Add dark mode toggle to settings page
+
+Positive path:
+- [ ] Toggle switches from light to dark mode
+- [ ] Dark mode preference persists across sessions
+- [ ] All UI components render correctly in dark mode
+
+Edge cases:
+- [ ] Toggle works when system preference is dark mode
+- [ ] No flash of unstyled content on page load
+
+Non-functional:
+- [ ] Dark mode loads within 100ms of toggle
+- [ ] No console errors or warnings
+```
+
+### Step 4: Automatic implementation
+
+`planning-agent` auto-invokes `implementation-agent` when planning is complete:
+
+<Steps>
+  <Step title="Branch creation">
+    ```bash
+    # Agent creates a feature branch
+    codex/LIN-123-add-dark-mode-toggle
+    ```
+  </Step>
+  
+  <Step title="Subtask execution">
+    The agent implements each `implement` subtask in sequence, updating tracker status as it progresses.
+  </Step>
+  
+  <Step title="Build and lint validation">
+    ```bash
+    # Agent detects and runs project commands
+    npm run build
+    npm run lint
+    ```
+    
+    Results are recorded in the tracker with pass/fail status and short error excerpts if failing.
+  </Step>
+  
+  <Step title="PR publication">
+    ```bash
+    # Agent pushes branch and creates PR
+    git push -u origin codex/LIN-123-add-dark-mode-toggle
+    gh pr create --title "Add dark mode toggle to settings page" --body "..."
+    ```
+    
+    Parent issue status moves to `In review` and receives tag `pr-published`.
+  </Step>
+</Steps>
+
+### Step 5: Automatic PR review
+
+`implementation-agent` auto-invokes `pr-review-agent` when the PR is published:
+
+<CodeGroup>
+```markdown PR comment (clean)
+Review Summary: Changes are acceptable.
+
+No blocking issues found. The dark mode toggle implementation:
+- Follows existing theme pattern in src/theme/provider.tsx:45
+- Correctly persists preference to localStorage
+- Handles edge cases for system preference
+
+Recommendation: Approve and merge.
+```
+
+```markdown PR comment (changes needed)
+Review Summary: Changes required before merge.
+
+Findings:
+
+**High severity:**
+- File: src/components/Settings.tsx:78
+- Problem: Dark mode toggle does not update context on first click
+- Required change: Call `setTheme()` in toggle handler before updating local state
+- Affected subtask: LIN-456
+
+**Medium severity:**
+- File: src/theme/styles.css:120
+- Problem: Missing dark mode styles for modal backdrop
+- Required change: Add `.modal-backdrop` dark mode variant
+- Affected subtask: LIN-457
+```
+</CodeGroup>
+
+If changes are required:
+1. Parent issue status returns to `In progress`
+2. `implementation-agent` is auto-invoked in **rework mode**
+3. Agent reads only `next_guidance.findings` from the review handoff
+4. Implements scoped fixes
+5. Updates the existing PR
+6. Routes back to `pr-review-agent`
+
+If review is clean:
+1. Parent issue receives tag `pr-reviewed`
+2. Parent issue status moves to `Done`
+3. Workflow completes
+
+## Understanding the execution trail
+
+Every skill leaves a structured audit trail in the issue tracker. Look for comments with:
+
+**Execution-Trace section:**
+```text
+Execution-Trace:
+Actions:
+1. read_parent_issue
+2. inspected_codebase (src/components/Settings.tsx, src/theme/provider.tsx)
+3. created_technical_plan
+4. created_implement_subtasks (6 subtasks)
+5. estimated_story_points (3)
+
+Decisions:
+- split_theme_provider_and_ui_changes: Separate concerns for easier review
+- reuse_existing_theme_context: Avoid introducing new state management
+
+References:
+- LIN-123 (parent issue)
+- src/theme/provider.tsx
+- src/components/Settings.tsx
+
+Assumptions:
+- Dark mode colors will use existing theme token system
+- localStorage is acceptable for preference persistence
+
+Open-Questions: none
+Skill-Version: planning-agent@0.0.1
+```
+
+**Workflow-Handoff JSON:**
+```json
+{
+  "from_skill": "planning-agent",
+  "to_skill": "implementation-agent",
+  "status": "ready",
+  "delta": ["created_technical_plan", "created_6_implementation_subtasks"],
+  "key_decisions": [
+    {
+      "decision": "split_theme_provider_and_ui_changes",
+      "reason": "Separate concerns for easier review"
+    }
+  ],
+  "relevant_artifacts": [
+    {
+      "artifact": "implementation-subtasks",
+      "hash": "sha256:a3f2...",
+      "last_modified": "2026-03-03T10:30:00Z",
+      "summary": "6 subtasks covering theme provider, UI components, and persistence"
+    }
+  ],
+  "open_blockers": [],
+  "next_guidance": {
+    "need_full": ["implementation-subtasks"],
+    "focus": ["implement_theme_provider_first", "test_persistence_edge_cases"]
+  }
+}
+```
+
+## Token consumption
+
+For planning budget per issue:
+
+<CardGroup cols={3}>
+  <Card title="Straight-through issue">
+    **~35k tokens**
+    
+    Requirements → Planning → Implementation → Review (clean)
+  </Card>
+  
+  <Card title="One review loop">
+    **~50k tokens**
+    
+    Includes one round of review findings and implementation rework
+  </Card>
+  
+  <Card title="Complex/high-ambiguity">
+    **~90k tokens**
+    
+    Multiple clarification rounds and review loops
+  </Card>
 </CardGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  Token estimates are conservative. Handoff summaries are capped at 600 tokens and use lazy artifact loading to minimize context reads.
 </Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup instructions and tracker configuration
+  </Card>
+  
+  <Card title="Available skills" icon="toolbox" href="/skills/requirements-ticket-agent">
+    Complete reference for all 6 workflow skills
+  </Card>
+  
+  <Card title="Workflow tags" icon="tags" href="/reference/workflow-tags">
+    Tag contracts for stage completion and open-question handling
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration/orchestra-config">
+    Configure tracker selection, custom commands, and skip steps
+  </Card>
+</CardGroup>
