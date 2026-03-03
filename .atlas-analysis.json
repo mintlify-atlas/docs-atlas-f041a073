@@ -1,0 +1,95 @@
+{
+  "projectType": "framework",
+  "projectName": "Open Orchestra",
+  "projectDescription": "A skill pack for agents that run a ticket-driven software delivery workflow from requirements to PR review and issue closure.",
+  "theme": "aspen",
+  "primaryColor": "#6366F1",
+  "lightColor": "#818CF8",
+  "darkColor": "#4F46E5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/workflow",
+              "concepts/agents",
+              "concepts/audit-trail",
+              "concepts/handoff-protocol"
+            ]
+          },
+          {
+            "group": "Skills",
+            "pages": [
+              "skills/requirements-ticket-agent",
+              "skills/triage-agent",
+              "skills/planning-agent",
+              "skills/qa-agent",
+              "skills/implementation-agent",
+              "skills/pr-review-agent"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/orchestra-config",
+              "configuration/issue-trackers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Workflows",
+            "pages": [
+              "reference/workflow-tags",
+              "reference/token-estimates",
+              "reference/json-contracts"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
+              "reference/linear-integration",
+              "reference/jira-integration",
+              "reference/github-integration"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Ticket-driven workflow automation from requirements to PR review",
+    "Six specialized agent skills for different phases of development",
+    "Code-as-architecture philosophy with live codebase inspection",
+    "Structured JSON handoff protocol for agent chaining",
+    "Support for Linear and Jira issue trackers",
+    "Audit trail with execution traces and reasoning",
+    "Automatic complexity classification and routing",
+    "Token-efficient context loading with lazy artifact reads"
+  ],
+  "publicApiSurface": [
+    "requirements-ticket-agent",
+    "triage-agent",
+    "planning-agent",
+    "qa-agent",
+    "implementation-agent",
+    "pr-review-agent",
+    "orchestra-config.json",
+    "Workflow-Handoff JSON contract",
+    "Execution-Trace JSON contract"
+  ]
+}
